@@ -40,4 +40,9 @@ mobile-release: generate
     xcodebuild -project Nutrition.xcodeproj -scheme NutritionMobile -configuration Release -sdk iphonesimulator -derivedDataPath .build/mobile-release build CODE_SIGNING_ALLOWED=NO
 
 update-icon picture:
-    zsh Native/Tools/update-app-icon.sh "{{picture}}"
+    zsh Tools/update-app-icon.sh "{{picture}}"
+
+install: release
+    mkdir -p ~/Applications
+    rm -rf ~/Applications/Notes.app
+    cp -R .build/xcode/Build/Products/Release/Notes.app ~/Applications/Notes.app
