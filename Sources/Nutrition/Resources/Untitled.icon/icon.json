@@ -1,0 +1,80 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "srgb:0.00000,0.56905,0.57462,1.00000",
+      "srgb:0.00000,0.56905,0.57462,1.00000"
+    ]
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "fill" : {
+            "solid" : "display-p3:0.93996,0.96783,0.91103,1.00000"
+          },
+          "hidden" : true,
+          "image-name" : "fruit-food-lemon-slice-svgrepo-com.svg",
+          "name" : "fruit-food-lemon-slice-svgrepo-com",
+          "position" : {
+            "scale" : 20,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "srgb:1.00000,1.00000,1.00000,1.00000",
+              "display-p3:0.93103,0.96783,0.93557,1.00000"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.5,
+                "y" : 1
+              },
+              "stop" : {
+                "x" : 0.5,
+                "y" : 0
+              }
+            }
+          },
+          "hidden" : true,
+          "image-name" : "fruit-food-orange-svgrepo-com.svg",
+          "name" : "fruit-food-orange-svgrepo-com",
+          "opacity" : 0.9,
+          "position" : {
+            "scale" : 22.5,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
+          },
+          "image-name" : "apple-seeds-svgrepo-com 2.svg",
+          "name" : "apple-seeds-svgrepo-com 2",
+          "opacity" : 0.8
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
