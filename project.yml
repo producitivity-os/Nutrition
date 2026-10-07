@@ -12,6 +12,12 @@ settings:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
 
+packages:
+  ProductivityUI:
+    path: ../../packages/ProductivityUI
+  ProductivityRoutineKit:
+    path: ../../packages/ProductivityRoutineKit
+
 targets:
   Nutrition:
     type: application
@@ -19,18 +25,17 @@ targets:
     deploymentTarget: "14.0"
 
     sources:
-      - path: Sources/Nutrition
-        excludes:
-          - Resources
-          - Mobile
-      - path: Sources/Nutrition/Mobile/Cloud
-    resources:
-      - path: Sources/Nutrition/Resources
+      - path: Sources/Shared
+      - path: Sources/macOS
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
     dependencies:
+      - package: ProductivityUI
+      - package: ProductivityRoutineKit
       - sdk: MapKit.framework
       - sdk: CloudKit.framework
     entitlements:
-      path: Sources/Nutrition/Nutrition.entitlements
+      path: Sources/macOS/Platform/Nutrition.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
@@ -41,7 +46,7 @@ targets:
           - CloudKit
 
     info:
-      path: Sources/Nutrition/Info.plist
+      path: Sources/macOS/Platform/Info.plist
       properties:
         CFBundleDisplayName: Nutrition
         CFBundleShortVersionString: "1.0"
@@ -68,7 +73,8 @@ targets:
     platform: macOS
     deploymentTarget: "14.0"
     sources:
-      - path: Tests/NutritionTests
+      - path: Tests/SharedTests
+      - path: Tests/macOSTests
     dependencies:
       - target: Nutrition
     settings:
@@ -76,46 +82,59 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.productivitysuite.nutrition.tests
         GENERATE_INFOPLIST_FILE: YES
 
-  NutritionMobile:
+  NutritionIOS:
     type: application
     platform: iOS
     deploymentTarget: "17.0"
     sources:
-      - path: Sources/Nutrition/Models/NutritionSchema.swift
-      - path: Sources/Nutrition/Services/NutritionCalculator.swift
-      - path: Sources/Nutrition/Services/NutritionSeedData.swift
-      - path: Sources/Nutrition/Services/NutritionStoreActor.swift
-      - path: Sources/Nutrition/Services/PlanningSupport.swift
-      - path: Sources/Nutrition/Mobile
-    resources:
-      - path: Sources/Nutrition/Resources
+      - path: Sources/Shared
+      - path: Sources/iOS
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
     dependencies:
+      - package: ProductivityUI
+      - package: ProductivityRoutineKit
       - sdk: HealthKit.framework
       - sdk: HealthKitUI.framework
       - sdk: CloudKit.framework
       - sdk: MapKit.framework
     entitlements:
-      path: Sources/Nutrition/Mobile/NutritionMobile.entitlements
+      path: Sources/iOS/Platform/NutritionIOS.entitlements
     info:
-      path: Sources/Nutrition/Mobile/Info.plist
+      path: Sources/iOS/Platform/Info.plist
+      properties:
+        CFBundleDisplayName: Nutrition
+        NSHealthShareUsageDescription: Nutrition reads active energy, workouts, and body mass to calculate your daily energy balance.
+        NSHealthUpdateUsageDescription: Nutrition saves logged meals, nutrients, and weight to Apple Health when you enable Health integration.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.productivitysuite.nutrition.actions
+            CFBundleURLSchemes: [productivity-nutrition]
+        LSApplicationQueriesSchemes: [productivity-routines]
+        UIBackgroundModes: [remote-notification]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.productivitysuite.nutrition.ios
+        PRODUCT_NAME: Nutrition
+        PRODUCT_MODULE_NAME: NutritionIOS
         CODE_SIGN_STYLE: Automatic
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
 
-  NutritionMobileTests:
+  NutritionIOSTests:
     type: bundle.unit-test
     platform: iOS
     deploymentTarget: "17.0"
     sources:
-      - path: Tests/NutritionMobileTests
+      - path: Tests/SharedTests
+      - path: Tests/iOSTests
     dependencies:
-      - target: NutritionMobile
+      - target: NutritionIOS
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.productivitysuite.nutrition.ios.tests
         GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Nutrition.app/Nutrition
+        BUNDLE_LOADER: $(TEST_HOST)
 
 schemes:
   Nutrition:
@@ -132,16 +151,16 @@ schemes:
         - NutritionTests
     archive:
       config: Release
-  NutritionMobile:
+  NutritionIOS:
     shared: true
     build:
       targets:
-        NutritionMobile: all
-        NutritionMobileTests: [test]
+        NutritionIOS: all
+        NutritionIOSTests: [test]
     run:
       config: Debug
     test:
       config: Debug
-      targets: [NutritionMobileTests]
+      targets: [NutritionIOSTests]
     archive:
       config: Release
