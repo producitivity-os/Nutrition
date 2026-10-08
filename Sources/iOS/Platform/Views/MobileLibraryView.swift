@@ -1,5 +1,9 @@
+import CryptoKit
+import PhotosUI
 import SwiftData
 import SwiftUI
+import UIKit
+import ProductivityUI
 
 struct MobileLibraryView: View {
     var body: some View {
@@ -13,7 +17,7 @@ struct MobileLibraryView: View {
     }
 }
 
-private struct IngredientRoute: Identifiable { let id: UUID; init(_ id: UUID = UUID()) { self.id = id } }
+struct IngredientRoute: Identifiable { let id: UUID; init(_ id: UUID = UUID()) { self.id = id } }
 
 struct MobileIngredientsView: View {
     @Environment(\.modelContext) private var context
@@ -27,7 +31,7 @@ struct MobileIngredientsView: View {
         List(filtered) { ingredient in
             Button { editor = IngredientRoute(ingredient.id) } label: {
                 HStack {
-                    Image(systemName: "leaf").foregroundStyle(.green)
+                    MobileFoodImage(asset: ingredient.image).frame(width: 42, height: 42)
                     VStack(alignment: .leading) {
                         Text(ingredient.name).foregroundStyle(.primary)
                         Text("Nutrition per \(ingredient.basisQuantity.formatted()) \(ingredient.basisUnit?.symbol ?? "unit")").font(.caption).foregroundStyle(.secondary)
@@ -35,7 +39,13 @@ struct MobileIngredientsView: View {
                     Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                 }
             }
-            .swipeActions { Button(role: .destructive) { ingredient.archivedAt = .now; try? context.save() } label: { Label("Archive", systemImage: "archivebox") } }
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button { editor = IngredientRoute(ingredient.id) } label: { Label("Edit", systemImage: "pencil") }
+                    .tint(NutritionTheme.accent)
+            }
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) { ingredient.archivedAt = .now; try? context.save() } label: { Label("Archive", systemImage: "archivebox") }
+            }
         }
         .overlay { if filtered.isEmpty { ContentUnavailableView("No ingredients", systemImage: "leaf") } }
         .navigationTitle("Ingredients")
@@ -45,11 +55,12 @@ struct MobileIngredientsView: View {
     }
 }
 
-private struct MobileIngredientEditor: View {
+struct MobileIngredientEditor: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Query(filter: #Predicate<UnitDefinition> { $0.isActive }, sort: [SortDescriptor(\UnitDefinition.name)]) private var units: [UnitDefinition]
     @Query(sort: [SortDescriptor(\NutrientDefinition.sortOrder)]) private var nutrientDefinitions: [NutrientDefinition]
+    @Query(filter: #Predicate<Store> { $0.archivedAt == nil }, sort: [SortDescriptor(\Store.name)]) private var stores: [Store]
     let ingredientID: UUID
     @State private var name = ""
     @State private var details = ""
@@ -57,6 +68,10 @@ private struct MobileIngredientEditor: View {
     @State private var basisUnitID = "g"
     @State private var nutrients: [String: Double] = [:]
     @State private var nutrientSearch = ""
+    @State private var imageAsset: MediaAsset?
+    @State private var photo: PhotosPickerItem?
+    @State private var selectedStoreIDs = Set<UUID>()
+    @State private var storeSearch = ""
     @State private var loaded = false
 
     private var ingredient: Ingredient? {
@@ -71,8 +86,13 @@ private struct MobileIngredientEditor: View {
         NavigationStack {
             Form {
                 Section("Ingredient") {
-                    TextField("Name", text: $name)
-                    TextField("Description", text: $details, axis: .vertical)
+                    HStack(alignment: .top, spacing: 14) {
+                        MobileEditableMediaTile(asset: $imageAsset, selection: $photo, size: CGSize(width: 104, height: 98))
+                        VStack {
+                            TextField("Name", text: $name)
+                            TextField("Description", text: $details, axis: .vertical)
+                        }
+                    }
                     HStack {
                         TextField("Nutrition basis", value: $basisQuantity, format: .number).keyboardType(.decimalPad)
                         Picker("Unit", selection: $basisUnitID) { ForEach(units) { Text($0.symbol).tag($0.id) } }.labelsHidden()
@@ -90,6 +110,24 @@ private struct MobileIngredientEditor: View {
                         }
                     }
                 }
+                Section("Stores") {
+                    TextField("Search stores", text: $storeSearch)
+                    ForEach(stores.filter { storeSearch.isEmpty || $0.name.localizedStandardContains(storeSearch) }) { store in
+                        Toggle(isOn: Binding(get: { selectedStoreIDs.contains(store.id) }, set: { selected in
+                            if selected { selectedStoreIDs.insert(store.id) } else { selectedStoreIDs.remove(store.id) }
+                        })) {
+                            HStack {
+                                Image(systemName: "storefront")
+                                Text(store.name)
+                                Spacer()
+                                Text("\(store.branches.filter { $0.archivedAt == nil }.count)").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                if ingredient != nil {
+                    Section("Reviews") { NutritionReviewSection(targetID: ingredientID) }
+                }
             }
             .navigationTitle(ingredient == nil ? "New Ingredient" : "Edit Ingredient")
             .toolbar {
@@ -97,6 +135,7 @@ private struct MobileIngredientEditor: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || basisQuantity <= 0) }
             }
             .onAppear { load() }
+            .onChange(of: photo) { _, item in Task { await importPhoto(item) } }
         }
     }
 
@@ -107,17 +146,33 @@ private struct MobileIngredientEditor: View {
     private func load() {
         guard !loaded else { return }; loaded = true
         guard let ingredient else { return }
-        name = ingredient.name; details = ingredient.ingredientDescription; basisQuantity = ingredient.basisQuantity; basisUnitID = ingredient.basisUnit?.id ?? "g"
+        name = ingredient.name; details = ingredient.ingredientDescription; basisQuantity = ingredient.basisQuantity; basisUnitID = ingredient.basisUnit?.id ?? "g"; imageAsset = ingredient.image
         nutrients = Dictionary(uniqueKeysWithValues: ingredient.nutrients.compactMap { value in value.nutrient.map { ($0.id, value.amount) } })
+        selectedStoreIDs = Set(ingredient.listings.compactMap { $0.store?.id })
     }
 
     private func save() {
         let target = ingredient ?? Ingredient(id: ingredientID, name: name)
         if ingredient == nil { context.insert(target) }
-        target.name = name.trimmingCharacters(in: .whitespacesAndNewlines); target.ingredientDescription = details; target.basisQuantity = basisQuantity; target.basisUnit = units.first { $0.id == basisUnitID }; target.updatedAt = .now
+        target.name = name.trimmingCharacters(in: .whitespacesAndNewlines); target.ingredientDescription = details; target.basisQuantity = basisQuantity; target.basisUnit = units.first { $0.id == basisUnitID }; target.image = imageAsset; target.updatedAt = .now
         target.nutrients.forEach(context.delete)
         target.nutrients = nutrientDefinitions.compactMap { definition in nutrients[definition.id].map { IngredientNutrient(amount: $0, ingredient: target, nutrient: definition) } }
+        for listing in target.listings where listing.store.map({ !selectedStoreIDs.contains($0.id) }) ?? true { context.delete(listing) }
+        target.listings.removeAll { $0.store.map { !selectedStoreIDs.contains($0.id) } ?? true }
+        for storeID in selectedStoreIDs where !target.listings.contains(where: { $0.store?.id == storeID }) {
+            guard let store = stores.first(where: { $0.id == storeID }) else { continue }
+            target.listings.append(IngredientListing(ingredient: target, store: store))
+        }
         try? context.save(); dismiss()
+    }
+
+    private func importPhoto(_ item: PhotosPickerItem?) async {
+        guard let data = try? await item?.loadTransferable(type: Data.self), let image = UIImage(data: data) else { return }
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let descriptor = FetchDescriptor<MediaAsset>(predicate: #Predicate { $0.contentHash == hash })
+        if let existing = try? context.fetch(descriptor).first { imageAsset = existing; return }
+        let asset = MediaAsset(contentHash: hash, originalName: "Ingredient photo", mimeType: "image", originalData: data, thumbnailData: data, width: Int(image.size.width), height: Int(image.size.height))
+        context.insert(asset); imageAsset = asset; try? context.save()
     }
 }
 
@@ -170,6 +225,19 @@ private struct MobileStoreEditor: View {
                         }
                     }
                     Button("Add Branch", systemImage: "plus") { branches.append(MobileBranchDraft()) }
+                }
+                if let branch = branches.first(where: { $0.latitude != nil && $0.longitude != nil }),
+                   let latitude = branch.latitude, let longitude = branch.longitude {
+                    Section("Location") {
+                        MeetupLocationMapCard(selectedEvent: GroupEventData(
+                            name: name.isEmpty ? "Store" : name,
+                            context: branch.address,
+                            latitude: latitude,
+                            longitude: longitude,
+                            type: .shop,
+                            members: branches.prefix(6).map { EventMember(name: $0.name) }
+                        ), height: 170)
+                    }
                 }
             }
             .navigationTitle(store == nil ? "New Store" : "Edit Store")

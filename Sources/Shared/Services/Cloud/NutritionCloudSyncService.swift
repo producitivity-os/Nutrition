@@ -48,7 +48,7 @@ final class NutritionCloudSyncService {
             },
             ingredients: ingredients.map { ingredient in
                 IngredientRecord(
-                    id: ingredient.id, name: ingredient.name, details: ingredient.ingredientDescription, basisQuantity: ingredient.basisQuantity, basisUnitID: ingredient.basisUnit?.id, archivedAt: ingredient.archivedAt, createdAt: ingredient.createdAt, updatedAt: ingredient.updatedAt,
+                    id: ingredient.id, name: ingredient.name, details: ingredient.ingredientDescription, basisQuantity: ingredient.basisQuantity, basisUnitID: ingredient.basisUnit?.id, archivedAt: ingredient.archivedAt, createdAt: ingredient.createdAt, updatedAt: ingredient.updatedAt, imageID: ingredient.image?.id,
                     nutrients: ingredient.nutrients.compactMap { value in value.nutrient.map { IngredientNutrientRecord(id: value.id, nutrientID: $0.id, amount: value.amount) } },
                     conversions: ingredient.conversions.compactMap { value in value.unit.map { IngredientConversionRecord(id: value.id, unitID: $0.id, basisUnitsPerUnit: value.basisUnitsPerUnit) } },
                     listings: ingredient.listings.map { IngredientListingRecord(id: $0.id, packageQuantity: $0.packageQuantity, priceMinor: $0.priceMinor, currencyCode: $0.currencyCode, available: $0.isAvailable, storeID: $0.store?.id, branchID: $0.branch?.id, unitID: $0.unit?.id) }
@@ -57,7 +57,7 @@ final class NutritionCloudSyncService {
             foods: foods.map { food in
                 FoodRecord(
                     id: food.id, name: food.name, imageID: food.image?.id, starred: food.isStarred, details: food.foodDescription, servings: food.servings, servingSizeQuantity: food.servingSizeQuantity, servingUnitID: food.servingSizeUnit?.id, category: food.categoryRaw, archivedAt: food.archivedAt, createdAt: food.createdAt, updatedAt: food.updatedAt,
-                    steps: food.steps.map { FoodStepRecord(id: $0.id, position: $0.position, instruction: $0.instruction) },
+                    steps: food.steps.map { FoodStepRecord(id: $0.id, position: $0.position, instruction: $0.instruction, durationMinutes: $0.durationMinutes) },
                     ingredients: food.ingredients.compactMap { item in guard let ingredientID = item.ingredient?.id, let unitID = item.unit?.id else { return nil }; return FoodIngredientRecord(id: item.id, ingredientID: ingredientID, quantity: item.quantity, position: item.position, unitID: unitID) }
                 )
             },
@@ -68,7 +68,7 @@ final class NutritionCloudSyncService {
     }
 
     private func merge(_ archive: CatalogArchive) throws {
-        guard archive.version == CatalogArchive.currentVersion else { throw CloudSyncError.unsupportedArchive }
+        guard (1...CatalogArchive.currentVersion).contains(archive.version) else { throw CloudSyncError.unsupportedArchive }
         let context = ModelContext(container)
         let existingUnits = try context.fetch(FetchDescriptor<UnitDefinition>())
         var units = Dictionary(uniqueKeysWithValues: existingUnits.map { ($0.id, $0) })
@@ -110,7 +110,7 @@ final class NutritionCloudSyncService {
             let value = ingredients[record.id] ?? Ingredient(id: record.id, name: record.name)
             if value.modelContext == nil { context.insert(value); ingredients[record.id] = value }
             guard value.updatedAt <= record.updatedAt else { continue }
-            value.name = record.name; value.ingredientDescription = record.details; value.basisQuantity = record.basisQuantity; value.basisUnit = record.basisUnitID.flatMap { units[$0] }; value.archivedAt = record.archivedAt; value.updatedAt = record.updatedAt
+            value.name = record.name; value.ingredientDescription = record.details; value.basisQuantity = record.basisQuantity; value.basisUnit = record.basisUnitID.flatMap { units[$0] }; value.image = record.imageID.flatMap { media[$0] }; value.archivedAt = record.archivedAt; value.updatedAt = record.updatedAt
             value.nutrients.forEach(context.delete); value.conversions.forEach(context.delete); value.listings.forEach(context.delete)
             value.nutrients = record.nutrients.compactMap { entry in nutrients[entry.nutrientID].map { IngredientNutrient(id: entry.id, amount: entry.amount, ingredient: value, nutrient: $0) } }
             value.conversions = record.conversions.compactMap { entry in units[entry.unitID].map { IngredientUnitConversion(id: entry.id, basisUnitsPerUnit: entry.basisUnitsPerUnit, ingredient: value, unit: $0) } }
@@ -124,7 +124,7 @@ final class NutritionCloudSyncService {
             guard value.updatedAt <= record.updatedAt else { continue }
             value.name = record.name; value.image = record.imageID.flatMap { media[$0] }; value.isStarred = record.starred; value.foodDescription = record.details; value.servings = record.servings; value.servingSizeQuantity = record.servingSizeQuantity; value.servingSizeUnit = record.servingUnitID.flatMap { units[$0] }; value.categoryRaw = record.category; value.archivedAt = record.archivedAt; value.updatedAt = record.updatedAt
             value.steps.forEach(context.delete); value.ingredients.forEach(context.delete)
-            value.steps = record.steps.map { FoodStep(id: $0.id, position: $0.position, instruction: $0.instruction, food: value) }
+            value.steps = record.steps.map { FoodStep(id: $0.id, position: $0.position, instruction: $0.instruction, durationMinutes: $0.durationMinutes, food: value) }
             value.ingredients = record.ingredients.compactMap { entry in guard let ingredient = ingredients[entry.ingredientID], let unit = units[entry.unitID] else { return nil }; return FoodIngredient(id: entry.id, quantity: entry.quantity, position: entry.position, food: value, ingredient: ingredient, unit: unit) }
         }
         let existingTemplates = try context.fetch(FetchDescriptor<MealPlanTemplate>())

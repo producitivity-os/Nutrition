@@ -16,10 +16,20 @@ struct ConsumptionSnapshotValue: Identifiable, Sendable {
     let nutrients: [NutrientAggregate]
     let priceMinor: Int?
     let currencyCode: String?
+    let loggedAt: Date
 
     func amount(_ nutrientID: String) -> Double? {
         nutrients.first(where: { $0.nutrientID == nutrientID && $0.isComplete })?.amount
     }
+}
+
+struct DailyMacroSnapshot: Identifiable, Sendable {
+    let date: Date
+    let calories: Double
+    let protein: Double
+    let carbohydrates: Double
+    let fat: Double
+    var id: Date { date }
 }
 
 struct HealthDaySnapshot: Sendable {
@@ -114,6 +124,26 @@ actor MobileHealthStore {
         return try modelContext.fetch(descriptor).map(value)
     }
 
+    func macroHistory(days: Int = 7, through date: Date = .now) throws -> [DailyMacroSnapshot] {
+        let calendar = Calendar.current
+        let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date)) ?? date
+        let start = calendar.date(byAdding: .day, value: -(max(1, days) - 1), to: calendar.startOfDay(for: date)) ?? date
+        let descriptor = FetchDescriptor<ConsumptionSnapshot>(predicate: #Predicate { $0.localDate >= start && $0.localDate < end })
+        let values = try modelContext.fetch(descriptor)
+        return (0..<max(1, days)).compactMap { offset in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
+            let next = calendar.date(byAdding: .day, value: 1, to: day) ?? day
+            let snapshots = values.filter { $0.localDate >= day && $0.localDate < next }.map(value)
+            return DailyMacroSnapshot(
+                date: day,
+                calories: snapshots.compactMap { $0.amount("energy_kcal") }.reduce(0, +),
+                protein: snapshots.compactMap { $0.amount("protein") }.reduce(0, +),
+                carbohydrates: snapshots.compactMap { $0.amount("carbohydrates") }.reduce(0, +),
+                fat: snapshots.compactMap { $0.amount("fat") }.reduce(0, +)
+            )
+        }
+    }
+
     func upsertDaySummary(date: Date, activeEnergy: Double, workoutCount: Int) throws {
         let day = Calendar.current.startOfDay(for: date)
         let descriptor = FetchDescriptor<HealthDaySummary>(predicate: #Predicate { $0.localDate == day })
@@ -156,7 +186,8 @@ actor MobileHealthStore {
             servings: snapshot.servings,
             nutrients: (try? JSONDecoder().decode([NutrientAggregate].self, from: snapshot.nutrientsData)) ?? [],
             priceMinor: snapshot.priceMinor,
-            currencyCode: snapshot.currencyCode
+            currencyCode: snapshot.currencyCode,
+            loggedAt: snapshot.loggedAt
         )
     }
 

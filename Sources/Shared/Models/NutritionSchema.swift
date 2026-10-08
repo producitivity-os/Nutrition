@@ -150,12 +150,19 @@ final class FoodStep {
     @Attribute(.unique) var id: UUID
     var position: Int
     var instruction: String
+    private var storedDurationMinutes: Int?
     var food: Food?
 
-    init(id: UUID = UUID(), position: Int, instruction: String, food: Food? = nil) {
+    var durationMinutes: Int {
+        get { storedDurationMinutes ?? 0 }
+        set { storedDurationMinutes = max(0, newValue) }
+    }
+
+    init(id: UUID = UUID(), position: Int, instruction: String, durationMinutes: Int = 0, food: Food? = nil) {
         self.id = id
         self.position = position
         self.instruction = instruction
+        storedDurationMinutes = max(0, durationMinutes)
         self.food = food
     }
 }
@@ -170,16 +177,18 @@ final class Ingredient {
     var archivedAt: Date?
     var createdAt: Date
     var updatedAt: Date
+    var image: MediaAsset?
     @Relationship(deleteRule: .cascade, inverse: \IngredientNutrient.ingredient) var nutrients: [IngredientNutrient]
     @Relationship(deleteRule: .cascade, inverse: \IngredientUnitConversion.ingredient) var conversions: [IngredientUnitConversion]
     @Relationship(deleteRule: .cascade, inverse: \IngredientListing.ingredient) var listings: [IngredientListing]
 
-    init(id: UUID = UUID(), name: String, ingredientDescription: String = "", basisQuantity: Double = 100, basisUnit: UnitDefinition? = nil) {
+    init(id: UUID = UUID(), name: String, ingredientDescription: String = "", basisQuantity: Double = 100, basisUnit: UnitDefinition? = nil, image: MediaAsset? = nil) {
         self.id = id
         self.name = name
         self.ingredientDescription = ingredientDescription
         self.basisQuantity = basisQuantity
         self.basisUnit = basisUnit
+        self.image = image
         createdAt = .now
         updatedAt = .now
         nutrients = []
@@ -505,7 +514,18 @@ enum NutritionSchemaV2: VersionedSchema {
     }
 }
 
-enum NutritionMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [NutritionSchemaV1.self, NutritionSchemaV2.self] }
-    static var stages: [MigrationStage] { [.lightweight(fromVersion: NutritionSchemaV1.self, toVersion: NutritionSchemaV2.self)] }
+@Model
+final class NutritionSchemaRevision {
+    @Attribute(.unique) var id: String
+    var version: Int
+
+    init(version: Int = 3) {
+        id = "current"
+        self.version = version
+    }
+}
+
+enum NutritionSchemaV3: VersionedSchema {
+    static let versionIdentifier = Schema.Version(3, 0, 0)
+    static var models: [any PersistentModel.Type] { NutritionSchemaV2.models + [NutritionSchemaRevision.self] }
 }

@@ -9,51 +9,42 @@ struct NutritionSummaryView: View {
         let title: String
         let value: String
         let percent: Int?
-        let level: String
-        let color: Color
     }
 
     private var cells: [Cell] {
         let proteinDV = definitions.first(where: { $0.id == "protein" })?.dailyValue ?? 50
         return [
-            .init(id: "energy", title: "Calories", value: analytics.amount("energy_kcal").map { "\(Int($0.rounded())) kcal" } ?? "—", percent: analytics.amount("energy_kcal").map { Int(($0 / 20).rounded()) }, level: "reference", color: Color(nsColor: .controlBackgroundColor)),
-            .init(id: "fat", title: "Fat", value: compact("fat"), percent: percent("fat", 78), level: analytics.trafficLight.fat ?? "unknown", color: trafficColor(analytics.trafficLight.fat)),
-            .init(id: "saturated", title: "Saturates", value: compact("saturated_fat"), percent: percent("saturated_fat", 20), level: analytics.trafficLight.saturatedFat ?? "unknown", color: trafficColor(analytics.trafficLight.saturatedFat)),
-            .init(id: "sugars", title: "Sugars", value: compact("sugars"), percent: percent("sugars", 90), level: analytics.trafficLight.sugars ?? "unknown", color: trafficColor(analytics.trafficLight.sugars)),
-            .init(id: "protein", title: "Protein", value: compact("protein"), percent: percent("protein", proteinDV), level: "focus", color: .blue.opacity(0.78)),
+            .init(id: "energy", title: "Calories", value: analytics.amount("energy_kcal").map { "\(Int($0.rounded())) kcal" } ?? "—", percent: analytics.amount("energy_kcal").map { Int(($0 / 20).rounded()) }),
+            .init(id: "fat", title: "Fat", value: compact("fat"), percent: percent("fat", 78)),
+            .init(id: "saturated", title: "Saturates", value: compact("saturated_fat"), percent: percent("saturated_fat", 20)),
+            .init(id: "sugars", title: "Sugars", value: compact("sugars"), percent: percent("sugars", 90)),
+            .init(id: "protein", title: "Protein", value: compact("protein"), percent: percent("protein", proteinDV)),
         ]
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Each serving contains").font(.caption.weight(.semibold))
-            HStack(spacing: 0) {
+            HStack(spacing: 8) {
                 ForEach(cells) { cell in
                     VStack(spacing: 5) {
-                        Text(cell.title).font(.caption2.weight(.bold)).lineLimit(1)
+                        Text(cell.title).font(.caption2.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
                         Spacer(minLength: 2)
-                        Text(cell.value).font(.subheadline.weight(.bold)).minimumScaleFactor(0.7).lineLimit(1)
-                        Text(cell.level.uppercased()).font(.system(size: 7, weight: .bold)).padding(.horizontal, 4).padding(.vertical, 2).background(.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 3))
-                        Text(cell.percent.map { "\($0)%" } ?? "—").font(.caption.weight(.bold)).frame(maxWidth: .infinity).padding(.vertical, 3).overlay(alignment: .top) { Divider().background(.black) }
+                        Text(cell.value).font(.headline).minimumScaleFactor(0.7).lineLimit(1)
+                        Text(cell.percent.map { "\($0)% daily value" } ?? "Incomplete")
+                            .font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .foregroundStyle(.black)
-                    .padding(.top, 7)
-                    .frame(maxWidth: .infinity, minHeight: 94)
-                    .background(cell.color)
-                    .overlay(alignment: .trailing) { if cell.id != cells.last?.id { Rectangle().fill(.black).frame(width: 1) } }
+                    .foregroundStyle(cell.id == "protein" ? NutritionTheme.accent : Color.primary)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, minHeight: 82)
+                    .background(cell.id == "protein" ? NutritionTheme.accent.opacity(0.12) : Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 11))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(.black, lineWidth: 1.5) }
-            Text("of an adult’s reference intake").font(.system(size: 8)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
     private func compact(_ id: String) -> String { NutritionFormat.amount(analytics.amount(id), unit: "g") }
     private func percent(_ id: String, _ dailyValue: Double) -> Int? { analytics.amount(id).map { Int(($0 / dailyValue * 100).rounded()) } }
-    private func trafficColor(_ level: String?) -> Color {
-        switch level { case "low": .green.opacity(0.72); case "medium": .orange.opacity(0.8); case "high": .red.opacity(0.78); default: Color(nsColor: .controlBackgroundColor) }
-    }
 }
 
 struct NutritionFactsView: View {
@@ -90,8 +81,5 @@ struct NutritionFactsView: View {
         .overlay { Rectangle().stroke(.black, lineWidth: 1.5) }
     }
 
-    private var servingSize: String {
-        if let quantity = food.servingSizeQuantity, let unit = food.servingSizeUnit { return "\(quantity.formatted()) \(unit.symbol)" }
-        return "1 serving"
-    }
+    private var servingSize: String { "1 serving" }
 }

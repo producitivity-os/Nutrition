@@ -1,26 +1,40 @@
 import SwiftData
 import SwiftUI
+import ProductivityUI
 
 struct MobileTodayView: View {
     @Environment(MobileAppState.self) private var state
     @Query(sort: [SortDescriptor(\PlannedMealItem.position)]) private var plannedItems: [PlannedMealItem]
     @State private var showingWeight = false
+    @State private var selectedDate = Calendar.current.startOfDay(for: .now)
 
     private var today: Date { Calendar.current.startOfDay(for: .now) }
     private var items: [PlannedMealItem] {
-        plannedItems.filter { Calendar.current.isDate($0.localDate, inSameDayAs: today) }
+        plannedItems.filter { Calendar.current.isDate($0.localDate, inSameDayAs: selectedDate) }
             .sorted {
                 let lhs = MealSlot.allCases.firstIndex(of: $0.mealSlot) ?? 0
                 let rhs = MealSlot.allCases.firstIndex(of: $1.mealSlot) ?? 0
                 return lhs == rhs ? $0.position < $1.position : lhs < rhs
             }
     }
+    private var agendaEvents: [WeekAgendaEvent] {
+        plannedItems.map { item in
+            let slotIndex = MealSlot.allCases.firstIndex(of: item.mealSlot) ?? 0
+            let date = Calendar.current.date(bySettingHour: 7 + slotIndex * 4, minute: 0, second: 0, of: item.localDate) ?? item.localDate
+            return WeekAgendaEvent(id: item.id, title: item.food?.name ?? item.mealSlot.title, date: date, colorHex: NutritionTheme.accentHex, detail: item.mealSlot.title)
+        }
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    statisticsWidgets
+                    WaterTrackerWidget(date: selectedDate).id(selectedDate)
                     energyCard
+                    caloriesBreakdown
+                    macroHistoryCard
+                    WeekStrip(selectedDate: $selectedDate, accentColor: NutritionTheme.accent, today: .now, checkedDates: Set(agendaEvents.map(\.date)))
                     if items.isEmpty {
                         ContentUnavailableView("No meals today", systemImage: "calendar", description: Text("Add meals from the Plans tab."))
                     } else {
@@ -51,6 +65,45 @@ struct MobileTodayView: View {
                 await state.refreshActivity()
             }
             .sheet(isPresented: $showingWeight) { WeightEntrySheet() }
+            .overlay(alignment: .bottomTrailing) {
+                MorphingActionMenu(actions: [
+                    .init(id: "weight", icon: "scalemass", title: "Log Weight"),
+                    .init(id: "health", icon: "heart.text.square", title: "Refresh Health")
+                ], tint: .orange) { item in
+                    if item.id == "weight" { showingWeight = true }
+                    else { Task { await state.refreshActivity() } }
+                }.padding()
+            }
+        }
+    }
+
+    private var caloriesBreakdown: some View {
+        let meals = state.todaySnapshots.map { snapshot in
+            CaloriesData(title: snapshot.foodName, type: .meal, amount: snapshot.amount("energy_kcal") ?? 0, date: snapshot.loggedAt, mealSlot: plannedItems.first(where: { $0.id == snapshot.plannedItemID })?.mealSlot)
+        }
+        return MealCaloriesBreakdown(data: meals)
+    }
+
+    private var statisticsWidgets: some View {
+        let snapshots = state.todaySnapshots
+        let calories = snapshots.compactMap { $0.amount("energy_kcal") }
+        let protein = snapshots.compactMap { $0.amount("protein") }
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
+            StatisticWidget(title: "Calories", systemImage: "flame.fill", value: snapshots.isEmpty || calories.count != snapshots.count ? "—" : calories.reduce(0, +).formatted(.number.precision(.fractionLength(0))), context: snapshots.isEmpty ? "No meals logged" : "kcal logged today", tint: Color(red: 1, green: 0.23, blue: 0.19))
+            StatisticWidget(title: "Protein", systemImage: "leaf.fill", value: snapshots.isEmpty || protein.count != snapshots.count ? "—" : "\(protein.reduce(0, +).formatted(.number.precision(.fractionLength(0...1)))) g", context: snapshots.isEmpty ? "No meals logged" : "Logged today", tint: NutritionTheme.accent)
+            CurrentWeightWidget(kilograms: state.recentWeights.first?.kilograms, previousKilograms: state.recentWeights.dropFirst().first?.kilograms, unit: state.preferences.weightUnit)
+        }
+    }
+
+    private var macroHistoryCard: some View {
+        ProductivitySectionCard("Protein over the last week") {
+            DynamicRangeBarChart(
+                data: state.macroHistory.map { DynamicBarChartData(date: $0.date, value: $0.protein) },
+                range: .week,
+                barsColor: .blue,
+                unit: "g"
+            )
+            .frame(height: 170)
         }
     }
 

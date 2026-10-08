@@ -1,7 +1,7 @@
 import Foundation
 
 struct CatalogArchive: Codable {
-    static let currentVersion = 1
+    static let currentVersion = 2
     var version = currentVersion
     var generatedAt = Date()
     var units: [UnitRecord]
@@ -88,12 +88,35 @@ struct IngredientRecord: Codable {
     let archivedAt: Date?
     let createdAt: Date
     let updatedAt: Date
+    let imageID: UUID?
     let nutrients: [IngredientNutrientRecord]
     let conversions: [IngredientConversionRecord]
     let listings: [IngredientListingRecord]
 }
 
-struct FoodStepRecord: Codable { let id: UUID; let position: Int; let instruction: String }
+struct FoodStepRecord: Codable {
+    let id: UUID
+    let position: Int
+    let instruction: String
+    let durationMinutes: Int
+
+    init(id: UUID, position: Int, instruction: String, durationMinutes: Int = 0) {
+        self.id = id
+        self.position = position
+        self.instruction = instruction
+        self.durationMinutes = durationMinutes
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, position, instruction, durationMinutes }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        position = try values.decode(Int.self, forKey: .position)
+        instruction = try values.decode(String.self, forKey: .instruction)
+        durationMinutes = try values.decodeIfPresent(Int.self, forKey: .durationMinutes) ?? 0
+    }
+}
 struct FoodIngredientRecord: Codable { let id: UUID; let ingredientID: UUID; let quantity: Double; let position: Int; let unitID: String }
 
 struct FoodRecord: Codable {

@@ -23,6 +23,26 @@ enum NutritionDestination: String, CaseIterable, Identifiable {
         case .stores: .store
         }
     }
+
+    var creationRoute: EditorRoute? {
+        switch self {
+        case .today: nil
+        case .foods: .food(UUID())
+        case .ingredients: .ingredient(UUID())
+        case .mealPlans: .mealPlan(UUID())
+        case .stores: .store(UUID())
+        }
+    }
+
+    var creationTitle: String {
+        switch self {
+        case .today: "New Item"
+        case .foods: "New Food"
+        case .ingredients: "New Ingredient"
+        case .mealPlans: "New Meal Plan"
+        case .stores: "New Store"
+        }
+    }
 }
 
 enum EditorRoute: Codable, Hashable {
@@ -44,6 +64,7 @@ final class NutritionAppState {
     var startupError: String?
     var cloudStatus = "Not synced"
     var isCloudSyncing = false
+    var requestedEditor: EditorRoute?
 
     init(container: ModelContainer) {
         self.container = container
@@ -72,5 +93,9 @@ final class NutritionAppState {
             cloudStatus = "Sync unavailable"
             startupError = error.localizedDescription
         }
+    }
+
+    func requestContextualNewItem() {
+        requestedEditor = selection.creationRoute
     }
 }

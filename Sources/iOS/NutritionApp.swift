@@ -34,6 +34,7 @@ struct NutritionIOSApp: App {
             MobileContentView()
                 .environment(state)
                 .modelContainer(catalogContainer)
+                .tint(NutritionTheme.accent)
         }
     }
 }

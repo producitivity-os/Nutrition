@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct NutritionTests {
     private func container() throws -> ModelContainer {
-        let schema = Schema(NutritionSchemaV2.models)
+        let schema = Schema(NutritionSchemaV3.models)
         let configuration = ModelConfiguration("NutritionTests", schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [configuration])
     }
@@ -36,6 +36,29 @@ struct NutritionTests {
         #expect(result.amount("energy_kcal") == 380)
         #expect(result.amount("protein") == nil)
         #expect(result.perServing.first(where: { $0.nutrientID == "protein" })?.isComplete == false)
+    }
+
+    @Test func preparationDurationsPersistAndAggregate() throws {
+        let container = try container()
+        let context = ModelContext(container)
+        let food = Food(name: "Soup")
+        food.steps = [
+            FoodStep(position: 0, instruction: "Chop", durationMinutes: 8, food: food),
+            FoodStep(position: 1, instruction: "Simmer", durationMinutes: 22, food: food),
+        ]
+        context.insert(food)
+        try context.save()
+
+        let reloaded = try ModelContext(container).fetch(FetchDescriptor<Food>()).first
+        #expect(reloaded?.totalPreparationMinutes == 30)
+        #expect(FoodStep(position: 0, instruction: "Legacy step").durationMinutes == 0)
+    }
+
+    @Test func versionOneStepArchiveDecodesWithSafeDuration() throws {
+        let id = UUID()
+        let json = "{\"id\":\"\(id.uuidString)\",\"position\":2,\"instruction\":\"Rest\"}"
+        let record = try JSONDecoder().decode(FoodStepRecord.self, from: Data(json.utf8))
+        #expect(record.durationMinutes == 0)
     }
 
     @Test func ingredientSpecificConversionChangesNutritionMultiplier() throws {

@@ -3,47 +3,169 @@ import PhotosUI
 import SwiftData
 import SwiftUI
 import UIKit
+import ProductivityUI
 
 struct MobileFoodsView: View {
+    @Environment(MobileAppState.self) private var state
     @Environment(\.modelContext) private var context
     @Query(filter: #Predicate<Food> { $0.archivedAt == nil }, sort: [SortDescriptor(\Food.name)]) private var foods: [Food]
     @State private var search = ""
     @State private var editor: FoodEditorRoute?
+    @State private var ingredientEditor: IngredientRoute?
+    @State private var analytics: [UUID: FoodAnalytics] = [:]
+    @State private var filters = MobileFoodFilterState()
+    @State private var showingFilters = false
 
     private var filtered: [Food] {
-        foods.filter { search.isEmpty || $0.name.localizedStandardContains(search) }
+        foods.filter { food in
+            guard search.isEmpty || food.name.localizedStandardContains(search) else { return false }
+            guard filters.category == nil || food.category == filters.category else { return false }
+            if filters.maximumMinutes < 300, food.totalPreparationMinutes > filters.maximumMinutes { return false }
+            guard let summary = analytics[food.id] else {
+                return filters.maximumCalories == 2_000 && filters.maximumPrice == 200 && filters.minimumProtein == 0
+            }
+            if filters.maximumCalories < 2_000, (summary.amount("energy_kcal") ?? .infinity) > filters.maximumCalories { return false }
+            if filters.minimumProtein > 0, (summary.amount("protein") ?? -.infinity) < filters.minimumProtein { return false }
+            if filters.maximumPrice < 200, Double(summary.cost?.perServingMinor ?? Int.max) / 100 > filters.maximumPrice { return false }
+            return true
+        }
             .sorted { ($0.isStarred ? 0 : 1, $0.name) < ($1.isStarred ? 0 : 1, $1.name) }
     }
 
     var body: some View {
         NavigationStack {
-            List(filtered) { food in
-                NavigationLink { MobileFoodDetailView(food: food) } label: {
-                    HStack(spacing: 12) {
-                        MobileFoodImage(asset: food.image).frame(width: 54, height: 54)
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack { Text(food.name).font(.headline); if food.isStarred { Image(systemName: "star.fill").foregroundStyle(.yellow) } }
-                            Text("\(food.servings.formatted()) servings · \(food.ingredients.count) ingredients")
-                                .font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack(spacing: 10) {
+                        HStack {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField("Search foods", text: $search)
+                        }
+                        .padding(.horizontal, 13).frame(height: 42)
+                        .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+                        Button { showingFilters = true } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .frame(width: 42, height: 42)
+                                .background(Color(.secondarySystemGroupedBackground), in: Circle())
+                        }
+                    }
+
+                    if filtered.isEmpty {
+                        ContentUnavailableView("No foods", systemImage: "fork.knife", description: Text(foods.isEmpty ? "Add your first recipe or drink." : "Try changing your search or filters."))
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .padding(.top, 24)
+                    } else {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 158), spacing: 12)], spacing: 12) {
+                            ForEach(filtered) { food in
+                                ZStack(alignment: .topTrailing) {
+                                    NavigationLink { MobileFoodDetailView(food: food) } label: {
+                                        MobileFoodCard(food: food, analytics: analytics[food.id])
+                                    }
+                                    .buttonStyle(.plain)
+                                    Button {
+                                        food.isStarred.toggle(); food.updatedAt = .now; try? context.save()
+                                    } label: {
+                                        Image(systemName: food.isStarred ? "star.fill" : "star")
+                                            .foregroundStyle(food.isStarred ? .yellow : .primary)
+                                            .frame(width: 32, height: 32)
+                                            .background(.ultraThinMaterial, in: Circle())
+                                    }
+                                    .padding(7)
+                                }
+                                .contextMenu {
+                                    Button("Edit") { editor = FoodEditorRoute(id: food.id) }
+                                    Button(food.isStarred ? "Unstar" : "Star") { food.isStarred.toggle(); try? context.save() }
+                                    Button("Archive", role: .destructive) { food.archivedAt = .now; try? context.save() }
+                                }
+                            }
                         }
                     }
                 }
-                .swipeActions {
-                    Button(role: .destructive) { food.archivedAt = .now; try? context.save() } label: { Label("Archive", systemImage: "archivebox") }
-                    Button { food.isStarred.toggle(); food.updatedAt = .now; try? context.save() } label: { Label("Star", systemImage: "star") }.tint(.yellow)
-                }
-                .contextMenu {
-                    Button("Edit") { editor = FoodEditorRoute(id: food.id) }
-                    Button(food.isStarred ? "Unstar" : "Star") { food.isStarred.toggle(); try? context.save() }
-                    Button("Archive", role: .destructive) { food.archivedAt = .now; try? context.save() }
-                }
+                .padding()
             }
-            .overlay { if filtered.isEmpty { ContentUnavailableView("No foods", systemImage: "fork.knife", description: Text("Add your first recipe or drink.")) } }
             .navigationTitle("Foods")
-            .searchable(text: $search)
-            .toolbar { Button { editor = FoodEditorRoute() } label: { Label("Add Food", systemImage: "plus") } }
+            .toolbar { Button { editor = FoodEditorRoute() } label: { Image(systemName: "plus").padding(6).background(NutritionTheme.accent, in: Circle()).foregroundStyle(.white) } }
             .sheet(item: $editor) { route in MobileFoodEditorView(foodID: route.id) }
+            .sheet(item: $ingredientEditor) { route in MobileIngredientEditor(ingredientID: route.id) }
+            .sheet(isPresented: $showingFilters) { MobileFoodFilters(filters: $filters).presentationDetents([.medium, .large]) }
+            .overlay(alignment: .bottomTrailing) {
+                MorphingActionMenu(actions: [
+                    .init(id: "food", icon: "fork.knife", title: "New Food"),
+                    .init(id: "ingredient", icon: "leaf.fill", title: "New Ingredient"),
+                ], tint: NutritionTheme.accent) { item in
+                    if item.id == "ingredient" { ingredientEditor = IngredientRoute() }
+                    else { editor = FoodEditorRoute() }
+                }
+                .padding()
+            }
+            .task(id: foods.map { "\($0.id.uuidString)-\($0.updatedAt.timeIntervalSinceReferenceDate)" }) {
+                var values: [UUID: FoodAnalytics] = [:]
+                for food in foods { values[food.id] = try? await state.catalogStore.analytics(foodID: food.id) }
+                analytics = values
+            }
         }
+    }
+}
+
+private struct MobileFoodFilterState {
+    var maximumCalories = 2_000.0
+    var maximumPrice = 200.0
+    var minimumProtein = 0.0
+    var maximumMinutes = 300
+    var category: FoodCategory?
+    var isDefault: Bool { maximumCalories == 2_000 && maximumPrice == 200 && minimumProtein == 0 && maximumMinutes == 300 && category == nil }
+}
+
+private struct MobileFoodFilters: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var filters: MobileFoodFilterState
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Picker("Type", selection: $filters.category) {
+                    Text("All").tag(FoodCategory?.none)
+                    ForEach(FoodCategory.allCases) { Text($0.rawValue.capitalized).tag(FoodCategory?.some($0)) }
+                }
+                LabeledContent("Maximum calories", value: "\(Int(filters.maximumCalories)) kcal")
+                Slider(value: $filters.maximumCalories, in: 100...2_000, step: 50)
+                LabeledContent("Maximum price", value: filters.maximumPrice.formatted(.currency(code: Locale.current.currency?.identifier ?? "USD")))
+                Slider(value: $filters.maximumPrice, in: 1...200, step: 1)
+                LabeledContent("Minimum protein", value: "\(Int(filters.minimumProtein)) g")
+                Slider(value: $filters.minimumProtein, in: 0...200, step: 5)
+                LabeledContent("Maximum preparation", value: "\(filters.maximumMinutes) min")
+                Slider(value: Binding(get: { Double(filters.maximumMinutes) }, set: { filters.maximumMinutes = Int($0) }), in: 5...300, step: 5)
+            }
+            .navigationTitle("Filters")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Reset") { filters = MobileFoodFilterState() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+    }
+}
+
+private struct MobileFoodCard: View {
+    let food: Food
+    let analytics: FoodAnalytics?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.tertiarySystemFill))
+                .frame(height: 132)
+                .overlay { MobileFoodImage(asset: food.image, contentMode: .fill) }
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            Text(food.name).font(.headline).lineLimit(1).truncationMode(.tail)
+            HStack { Label(food.totalPreparationMinutes > 0 ? "\(food.totalPreparationMinutes) min" : "—", systemImage: "clock"); Spacer(); Text(analytics?.amount("energy_kcal").map { "\(Int($0.rounded())) kcal" } ?? "— kcal") }
+                .font(.caption).foregroundStyle(.secondary)
+            Text(analytics?.amount("protein").map {
+                $0.formatted(.number.precision(.fractionLength(0...1))) + " g protein"
+            } ?? "— g protein")
+                .font(.subheadline.bold()).foregroundStyle(NutritionTheme.accent)
+        }
+        .padding(10)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 17))
     }
 }
 
@@ -69,16 +191,31 @@ struct MobileFoodDetailView: View {
                 }
                 if let analytics {
                     MobileNutritionSummary(analytics: analytics)
+                    HStack(spacing: 9) {
+                        detailMetric("Servings", "\(Int(food.servings.rounded()))", "person.2")
+                        detailMetric("Preparation", food.totalPreparationMinutes > 0 ? "\(food.totalPreparationMinutes) min" : "—", "clock")
+                    }
                     nutrientGrid(analytics)
                     Text("Ingredients").font(.title2.bold())
                     ForEach(food.ingredients.sorted { $0.position < $1.position }) { item in
-                        HStack { Text(item.ingredient?.name ?? "Missing ingredient"); Spacer(); Text("\(item.quantity.formatted()) \(item.unit?.symbol ?? "")").foregroundStyle(.secondary) }
+                        HStack {
+                            MobileFoodImage(asset: item.ingredient?.image).frame(width: 36, height: 36)
+                            Text(item.ingredient?.name ?? "Missing ingredient")
+                            Spacer()
+                            Text("\(item.quantity.formatted()) \(item.unit?.symbol ?? "")").foregroundStyle(.secondary)
+                        }
                         Divider()
                     }
                     Text("Steps").font(.title2.bold())
                     ForEach(food.steps.sorted { $0.position < $1.position }) { step in
-                        HStack(alignment: .top) { Text("\(step.position + 1)").font(.caption.bold()).foregroundStyle(.secondary); Text(step.instruction) }
+                        HStack(alignment: .top) {
+                            Text("\(step.position + 1)").font(.caption.bold()).foregroundStyle(.secondary)
+                            Text(step.instruction)
+                            Spacer()
+                            if step.durationMinutes > 0 { Text("\(step.durationMinutes) min").font(.caption).foregroundStyle(.secondary) }
+                        }
                     }
+                    NutritionReviewSection(targetID: food.id)
                 } else { ProgressView().frame(maxWidth: .infinity) }
             }
             .padding()
@@ -88,6 +225,16 @@ struct MobileFoodDetailView: View {
         .toolbar { Button("Edit") { editing = true } }
         .sheet(isPresented: $editing) { MobileFoodEditorView(foodID: food.id) }
         .task(id: food.updatedAt) { analytics = try? await state.catalogStore.analytics(foodID: food.id) }
+    }
+
+    private func detailMetric(_ label: String, _ value: String, _ icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(label, systemImage: icon).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.headline)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(11)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 11))
     }
 
     private func nutrientGrid(_ analytics: FoodAnalytics) -> some View {
@@ -115,7 +262,7 @@ struct MobileNutritionSummary: View {
             metric("Fat", analytics.amount("fat"), "g", .primary)
             metric("Saturates", analytics.amount("saturated_fat"), "g", .primary)
             metric("Sugars", analytics.amount("sugars"), "g", .primary)
-            metric("Protein", analytics.amount("protein"), "g", .blue)
+            metric("Protein", analytics.amount("protein"), "g", NutritionTheme.accent)
         }
         .padding(8)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -133,21 +280,55 @@ struct MobileNutritionSummary: View {
 
 struct MobileFoodImage: View {
     let asset: MediaAsset?
+    var contentMode: ContentMode = .fill
+
     var body: some View {
-        Group {
-            if let data = asset?.thumbnailData ?? asset?.originalData, let image = UIImage(data: data) {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                ZStack { Color(.tertiarySystemFill); Image(systemName: "fork.knife").font(.title).foregroundStyle(.secondary) }
+        GeometryReader { bounds in
+            Group {
+                if let data = asset?.thumbnailData ?? asset?.originalData, let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: contentMode)
+                } else {
+                    ZStack { Color(.tertiarySystemFill); Image(systemName: "fork.knife").font(.title).foregroundStyle(.secondary) }
+                }
             }
+            .frame(width: bounds.size.width, height: bounds.size.height)
+            .clipped()
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct MobileEditableMediaTile: View {
+    @Binding var asset: MediaAsset?
+    @Binding var selection: PhotosPickerItem?
+    let size: CGSize
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            MobileFoodImage(asset: asset)
+            Text(asset == nil ? "Choose" : "Replace")
+                .font(.caption.bold())
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(6)
+                .allowsHitTesting(false)
+            PhotosPicker(selection: $selection, matching: .images) {
+                Color.clear.contentShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Choose or replace image")
+        }
+        .frame(width: size.width, height: size.height)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
 private struct MobileStepDraft: Identifiable {
     var id = UUID()
     var text = ""
+    var durationMinutes = 0
 }
 
 private struct MobileIngredientDraft: Identifiable {
@@ -166,12 +347,12 @@ private struct MobileFoodEditorView: View {
     @State private var name = ""
     @State private var details = ""
     @State private var servings = 1.0
-    @State private var starred = false
     @State private var category = FoodCategory.food
     @State private var steps: [MobileStepDraft] = []
     @State private var components: [MobileIngredientDraft] = []
     @State private var imageAsset: MediaAsset?
     @State private var photo: PhotosPickerItem?
+    @State private var showingIngredientPicker = false
     @State private var loaded = false
 
     private var food: Food? {
@@ -183,20 +364,20 @@ private struct MobileFoodEditorView: View {
         NavigationStack {
             Form {
                 Section("Food") {
-                    TextField("Name", text: $name)
-                    TextField("Description", text: $details, axis: .vertical)
+                    HStack(alignment: .top, spacing: 14) {
+                        MobileEditableMediaTile(asset: $imageAsset, selection: $photo, size: CGSize(width: 112, height: 104))
+                        VStack {
+                            TextField("Name", text: $name)
+                            TextField("Description", text: $details, axis: .vertical)
+                        }
+                    }
                     TextField("Servings", value: $servings, format: .number).keyboardType(.decimalPad)
-                    Toggle("Starred", isOn: $starred)
                     Picker("Type", selection: $category) { ForEach(FoodCategory.allCases) { Text($0.rawValue.capitalized).tag($0) } }
-                    PhotosPicker(selection: $photo, matching: .images) { Label("Choose Picture", systemImage: "photo") }
                 }
                 Section("Ingredients") {
                     ForEach($components) { $component in
                         VStack(alignment: .leading) {
-                            Picker("Ingredient", selection: $component.ingredientID) {
-                                Text("Choose").tag(UUID?.none)
-                                ForEach(ingredients) { Text($0.name).tag(UUID?.some($0.id)) }
-                            }
+                            Text(ingredients.first(where: { $0.id == component.ingredientID })?.name ?? "Missing ingredient").font(.headline)
                             HStack {
                                 TextField("Quantity", value: $component.quantity, format: .number).keyboardType(.decimalPad)
                                 Picker("Unit", selection: $component.unitID) { ForEach(units) { Text($0.symbol).tag($0.id) } }.labelsHidden()
@@ -204,13 +385,15 @@ private struct MobileFoodEditorView: View {
                             }
                         }
                     }
-                    Button("Add Ingredient", systemImage: "plus") {
-                        components.append(MobileIngredientDraft(ingredientID: ingredients.first?.id, quantity: ingredients.first?.basisQuantity ?? 1, unitID: ingredients.first?.basisUnit?.id ?? "g"))
-                    }
+                    Button("Choose Ingredients", systemImage: "checklist") { showingIngredientPicker = true }
                 }
                 Section("Preparation") {
                     ForEach($steps) { $step in
-                        HStack { TextField("Atomic step", text: $step.text); Button(role: .destructive) { steps.removeAll { $0.id == step.id } } label: { Image(systemName: "trash") } }
+                        HStack {
+                            TextField("Atomic step", text: $step.text)
+                            TextField("Min", value: $step.durationMinutes, format: .number).keyboardType(.numberPad).frame(width: 52)
+                            Button(role: .destructive) { steps.removeAll { $0.id == step.id } } label: { Image(systemName: "trash") }
+                        }
                     }
                     Button("Add Step", systemImage: "plus") { steps.append(MobileStepDraft()) }
                 }
@@ -222,25 +405,28 @@ private struct MobileFoodEditorView: View {
             }
             .onAppear { load() }
             .onChange(of: photo) { _, item in Task { await importPhoto(item) } }
+            .sheet(isPresented: $showingIngredientPicker) {
+                MobileIngredientSelection(available: ingredients, selected: $components)
+            }
         }
     }
 
     private func load() {
         guard !loaded else { return }; loaded = true
         guard let food else { return }
-        name = food.name; details = food.foodDescription; servings = food.servings; starred = food.isStarred; category = food.category; imageAsset = food.image
-        steps = food.steps.sorted { $0.position < $1.position }.map { MobileStepDraft(id: $0.id, text: $0.instruction) }
+        name = food.name; details = food.foodDescription; servings = food.servings; category = food.category; imageAsset = food.image
+        steps = food.steps.sorted { $0.position < $1.position }.map { MobileStepDraft(id: $0.id, text: $0.instruction, durationMinutes: $0.durationMinutes) }
         components = food.ingredients.sorted { $0.position < $1.position }.map { MobileIngredientDraft(id: $0.id, ingredientID: $0.ingredient?.id, quantity: $0.quantity, unitID: $0.unit?.id ?? "g") }
     }
 
     private func save() {
         let target = food ?? Food(id: foodID, name: name)
         if food == nil { context.insert(target) }
-        target.name = name.trimmingCharacters(in: .whitespacesAndNewlines); target.foodDescription = details; target.servings = servings; target.isStarred = starred; target.category = category; target.image = imageAsset; target.updatedAt = .now
+        target.name = name.trimmingCharacters(in: .whitespacesAndNewlines); target.foodDescription = details; target.servings = servings; target.category = category; target.image = imageAsset; target.updatedAt = .now
         target.steps.forEach(context.delete); target.ingredients.forEach(context.delete)
         target.steps = steps.enumerated().compactMap { index, draft in
             let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? nil : FoodStep(id: draft.id, position: index, instruction: text, food: target)
+            return text.isEmpty ? nil : FoodStep(id: draft.id, position: index, instruction: text, durationMinutes: max(0, draft.durationMinutes), food: target)
         }
         target.ingredients = components.enumerated().compactMap { index, draft in
             guard let ingredient = ingredients.first(where: { $0.id == draft.ingredientID }), let unit = units.first(where: { $0.id == draft.unitID }), draft.quantity > 0 else { return nil }
@@ -256,5 +442,34 @@ private struct MobileFoodEditorView: View {
         if let existing = try? context.fetch(descriptor).first { imageAsset = existing; return }
         let asset = MediaAsset(contentHash: hash, originalName: "Food photo", mimeType: "image", originalData: data, thumbnailData: data, width: Int(image.size.width), height: Int(image.size.height))
         context.insert(asset); imageAsset = asset; try? context.save()
+    }
+}
+
+private struct MobileIngredientSelection: View {
+    @Environment(\.dismiss) private var dismiss
+    let available: [Ingredient]
+    @Binding var selected: [MobileIngredientDraft]
+    @State private var search = ""
+
+    var body: some View {
+        NavigationStack {
+            List(available.filter { search.isEmpty || $0.name.localizedStandardContains(search) }) { ingredient in
+                Toggle(isOn: Binding(get: { selected.contains { $0.ingredientID == ingredient.id } }, set: { enabled in
+                    if enabled {
+                        if !selected.contains(where: { $0.ingredientID == ingredient.id }) {
+                            selected.append(MobileIngredientDraft(ingredientID: ingredient.id, quantity: ingredient.basisQuantity, unitID: ingredient.basisUnit?.id ?? "g"))
+                        }
+                    } else { selected.removeAll { $0.ingredientID == ingredient.id } }
+                })) {
+                    HStack {
+                        MobileFoodImage(asset: ingredient.image).frame(width: 40, height: 40)
+                        Text(ingredient.name)
+                    }
+                }
+            }
+            .searchable(text: $search)
+            .navigationTitle("Ingredients")
+            .toolbar { Button("Done") { dismiss() } }
+        }
     }
 }

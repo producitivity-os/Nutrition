@@ -15,6 +15,7 @@ final class MobileAppState {
     var todaySnapshots: [ConsumptionSnapshotValue] = []
     var activity: HealthDaySnapshot?
     var recentWeights: [WeightSnapshot] = []
+    var macroHistory: [DailyMacroSnapshot] = []
     var isReady = false
     var errorMessage: String?
     var cloudStatus = "Not synced"
@@ -45,6 +46,7 @@ final class MobileAppState {
         todaySnapshots = try await healthStore.snapshots(on: .now)
         activity = try await healthStore.daySummary(date: .now)
         recentWeights = try await healthStore.recentWeights()
+        macroHistory = try await healthStore.macroHistory()
     }
 
     func setMeal(_ itemID: UUID, consumed: Bool) async {
@@ -53,6 +55,7 @@ final class MobileAppState {
                 guard let draft = try await catalogStore.consumptionDraft(itemID: itemID) else { return }
                 let snapshot = try await healthStore.logMeal(draft)
                 todaySnapshots = try await healthStore.snapshots(on: .now)
+                macroHistory = try await healthStore.macroHistory()
                 if preferences.healthKitEnabled, await healthKit.requestAccess() {
                     do {
                         let correlationID = try await healthKit.saveMeal(snapshot)
@@ -64,6 +67,7 @@ final class MobileAppState {
             } else {
                 let correlationID = try await healthStore.removeMeal(plannedItemID: itemID)
                 todaySnapshots = try await healthStore.snapshots(on: .now)
+                macroHistory = try await healthStore.macroHistory()
                 if let correlationID, preferences.healthKitEnabled {
                     try? await healthKit.deleteMeal(correlationID: correlationID)
                 }

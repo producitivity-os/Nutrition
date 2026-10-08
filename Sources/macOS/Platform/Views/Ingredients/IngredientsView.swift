@@ -6,6 +6,7 @@ struct IngredientsView: View {
     @Environment(\.openWindow) private var openWindow
     @Query(filter: #Predicate<Ingredient> { $0.archivedAt == nil }, sort: [SortDescriptor(\Ingredient.name)]) private var ingredients: [Ingredient]
     @State private var search = ""
+    @State private var revealedIngredientID: UUID?
 
     private var filtered: [Ingredient] { ingredients.filter { search.isEmpty || $0.name.localizedStandardContains(search) } }
 
@@ -17,9 +18,24 @@ struct IngredientsView: View {
                 .padding(.horizontal, 9).frame(height: 31).background(.background, in: RoundedRectangle(cornerRadius: 8)).overlay { RoundedRectangle(cornerRadius: 8).stroke(.separator) }.padding(20)
             if filtered.isEmpty {
                 EmptyCollectionView(icon: .leaf, title: "No ingredients yet", message: "Add ingredients with nutrition per 100 g or any basis you choose.")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.top, 28)
             } else {
                 List(filtered) { ingredient in
-                    IngredientRow(ingredient: ingredient)
+                    IngredientSwipeRow(
+                        ingredient: ingredient,
+                        isRevealed: Binding(
+                            get: { revealedIngredientID == ingredient.id },
+                            set: { revealedIngredientID = $0 ? ingredient.id : nil }
+                        ),
+                        edit: { openWindow(value: EditorRoute.ingredient(ingredient.id)) },
+                        duplicate: { duplicate(ingredient) },
+                        remove: {
+                            ingredient.archivedAt = .now
+                            ingredient.updatedAt = .now
+                            try? context.save()
+                        }
+                    )
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) { openWindow(value: EditorRoute.ingredient(ingredient.id)) }
                         .contextMenu {
@@ -34,7 +50,7 @@ struct IngredientsView: View {
     }
 
     private func duplicate(_ source: Ingredient) {
-        let copy = Ingredient(name: "\(source.name) Copy", ingredientDescription: source.ingredientDescription, basisQuantity: source.basisQuantity, basisUnit: source.basisUnit)
+        let copy = Ingredient(name: "\(source.name) Copy", ingredientDescription: source.ingredientDescription, basisQuantity: source.basisQuantity, basisUnit: source.basisUnit, image: source.image)
         context.insert(copy)
         copy.nutrients = source.nutrients.map { IngredientNutrient(amount: $0.amount, ingredient: copy, nutrient: $0.nutrient) }
         copy.conversions = source.conversions.map { IngredientUnitConversion(basisUnitsPerUnit: $0.basisUnitsPerUnit, ingredient: copy, unit: $0.unit) }
@@ -43,11 +59,76 @@ struct IngredientsView: View {
     }
 }
 
+private struct IngredientSwipeRow: View {
+    let ingredient: Ingredient
+    @Binding var isRevealed: Bool
+    let edit: () -> Void
+    let duplicate: () -> Void
+    let remove: () -> Void
+    @GestureState private var translation: CGFloat = 0
+    private let actionWidth: CGFloat = 216
+
+    private var offset: CGFloat {
+        min(0, max(-actionWidth, (isRevealed ? -actionWidth : 0) + translation))
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            HStack(spacing: 0) {
+                action("Edit", symbol: "pencil", color: NutritionTheme.accent, perform: edit)
+                action("Duplicate", symbol: "doc.on.doc", color: .gray, perform: duplicate)
+                action("Delete", symbol: "trash", color: .red, perform: remove)
+            }
+            .frame(width: actionWidth)
+            .opacity(offset < 0 ? 1 : 0)
+            .allowsHitTesting(isRevealed)
+
+            IngredientRow(ingredient: ingredient)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .offset(x: offset)
+                .gesture(
+                    DragGesture(minimumDistance: 15)
+                        .updating($translation) { value, state, _ in
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            state = value.translation.width
+                        }
+                        .onEnded { value in
+                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                isRevealed = (isRevealed ? -actionWidth : 0) + value.predictedEndTranslation.width < -60
+                            }
+                        }
+                )
+        }
+        .clipped()
+        .accessibilityAction(named: "Edit", edit)
+        .accessibilityAction(named: "Duplicate", duplicate)
+        .accessibilityAction(named: "Delete", remove)
+    }
+
+    private func action(_ title: String, symbol: String, color: Color, perform: @escaping () -> Void) -> some View {
+        Button {
+            isRevealed = false
+            perform()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: symbol)
+                Text(title).font(.caption2)
+            }
+            .foregroundStyle(.white)
+            .frame(width: 72, height: 56)
+            .background(color)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct IngredientRow: View {
     let ingredient: Ingredient
     var body: some View {
         HStack(spacing: 12) {
-            ZStack { RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.1)); LucideIcon(name: .leaf, size: 17).foregroundStyle(.tint) }.frame(width: 36, height: 36)
+            MediaThumbnail(asset: ingredient.image, cornerRadius: 9).frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 2) { Text(ingredient.name).font(.headline); Text(ingredient.ingredientDescription.isEmpty ? "\(ingredient.basisQuantity.formatted()) \(ingredient.basisUnit?.symbol ?? "") basis" : ingredient.ingredientDescription).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             Spacer()
             nutrient("Protein", "protein", "g")

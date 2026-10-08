@@ -3,6 +3,7 @@ import Foundation
 struct StepDraft: Identifiable, Hashable {
     var id = UUID()
     var instruction = ""
+    var durationMinutes = 0
 }
 
 struct FoodIngredientDraft: Identifiable, Hashable {
