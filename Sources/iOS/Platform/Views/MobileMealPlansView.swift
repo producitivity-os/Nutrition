@@ -43,7 +43,13 @@ struct MobileMealPlansView: View {
             Button { editor = .template(template.id) } label: {
                 HStack { VStack(alignment: .leading) { Text(template.name).foregroundStyle(.primary); Text("\(template.items.count) meals").font(.caption).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
             }
-            .swipeActions { Button(role: .destructive) { template.archivedAt = .now; try? context.save() } label: { Label("Archive", systemImage: "archivebox") } }
+            .swipeActions {
+                Button(role: .destructive) { template.archivedAt = .now; try? context.save() } label: {
+                    Label("Archive", systemImage: "archivebox")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 24, height: 24, alignment: .center)
+                }
+            }
         }
         .overlay { if templates.isEmpty { ContentUnavailableView("No templates", systemImage: "calendar.badge.plus") } }
     }

@@ -33,40 +33,7 @@ struct FoodsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .bottom) {
-                PageHeader(eyebrow: "Recipes and dishes", title: "Foods")
-                Spacer()
-                Button { openWindow(value: EditorRoute.food(UUID())) } label: {
-                    Image(systemName: "plus")
-                        .font(.headline)
-                        .frame(width: 30, height: 30)
-                        .background(NutritionTheme.accent, in: Circle())
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .help("Add Food")
-            }
-
-            HStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    LucideIcon(name: .search, size: 15).foregroundStyle(.secondary)
-                    TextField("Search foods", text: $search).textFieldStyle(.plain)
-                }
-                .padding(.horizontal, 13)
-                .frame(height: 38)
-                .background(.background, in: Capsule())
-                .overlay { Capsule().stroke(.secondary.opacity(0.18)) }
-
-                Button { showsFilters.toggle() } label: {
-                    Label("Filters", systemImage: "slider.horizontal.3")
-                        .padding(.horizontal, 10)
-                        .frame(height: 38)
-                        .background(showsFilters || !filters.isDefault ? NutritionTheme.accent.opacity(0.14) : Color.secondary.opacity(0.08), in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-
+        ScrollView {
             if filteredFoods.isEmpty {
                 EmptyCollectionView(
                     icon: .forkKnife,
@@ -76,20 +43,28 @@ struct FoodsView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(.top, 28)
             } else {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 205, maximum: 285), spacing: 14)], spacing: 14) {
-                        ForEach(filteredFoods) { food in
-                            FoodCardView(food: food, analytics: analytics[food.id], toggleStar: { toggleStar(food) })
-                                .onTapGesture { selectedID = food.id }
-                                .contextMenu { foodMenu(food) }
-                        }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 205, maximum: 285), spacing: 14)], spacing: 14) {
+                    ForEach(filteredFoods) { food in
+                        FoodCardView(food: food, analytics: analytics[food.id], toggleStar: { toggleStar(food) })
+                            .onTapGesture { selectedID = food.id }
+                            .contextMenu { foodMenu(food) }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.bottom, 82)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 82)
             }
         }
         .padding(20)
+        .searchable(text: $search, placement: .toolbar, prompt: "Search foods")
+        .toolbarBackground(.hidden, for: .windowToolbar)
+        .toolbar {
+            ToolbarItem(placement: .secondaryAction) {
+                Button { showsFilters.toggle() } label: {
+                    Image(systemName: showsFilters || !filters.isDefault ? "slider.horizontal.3.circle.fill" : "slider.horizontal.3")
+                }
+                .help("Filter Foods")
+            }
+        }
         .onGeometryChange(for: CGSize.self) { proxy in proxy.size } action: { size in
             availablePanelSize = CGSize(width: max(1, size.width - 32), height: max(1, size.height - 32))
         }
@@ -332,9 +307,6 @@ struct FoodDetailView: View {
                             }
                         }
                         .frame(maxWidth: .infinity)
-
-                        NutritionFactsView(food: food, analytics: analytics, definitions: definitions)
-                            .frame(width: 235)
                     }
 
                     trackedNutrients(analytics)

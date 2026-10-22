@@ -34,7 +34,7 @@ struct FoodAnalytics: Hashable, Sendable {
 enum NutritionCalculator {
     static func calculate(food: Food, nutrients definitions: [NutrientDefinition], preferences: AppPreferences?) -> FoodAnalytics {
         let orderedComponents = food.ingredients.sorted { $0.position < $1.position }
-        var totals = Dictionary(uniqueKeysWithValues: definitions.map { ($0.id, (amount: 0.0, complete: true)) })
+        var totals = Dictionary(uniqueKeysWithValues: definitions.map { ($0.id, (amount: 0.0, hasValue: false, complete: true)) })
 
         for component in orderedComponents {
             guard let ingredient = component.ingredient,
@@ -47,14 +47,16 @@ enum NutritionCalculator {
                 value.nutrient.map { ($0.id, value.amount) }
             })
             for definition in definitions {
-                if let amount = known[definition.id] { totals[definition.id]?.amount += amount * multiplier }
-                else { totals[definition.id]?.complete = false }
+                guard let amount = known[definition.id] else { continue }
+                totals[definition.id]?.amount += amount * multiplier
+                totals[definition.id]?.hasValue = true
             }
         }
 
         let totalValues = definitions.map { definition in
-            let value = totals[definition.id] ?? (0, false)
-            return NutrientAggregate(nutrientID: definition.id, amount: value.complete ? value.amount : nil, isComplete: value.complete)
+            let value = totals[definition.id] ?? (0, false, false)
+            let isComplete = value.complete && value.hasValue
+            return NutrientAggregate(nutrientID: definition.id, amount: isComplete ? value.amount : nil, isComplete: isComplete)
         }
         let servings = max(food.servings, 0.000_001)
         let perServing = totalValues.map { NutrientAggregate(nutrientID: $0.nutrientID, amount: $0.amount.map { $0 / servings }, isComplete: $0.isComplete) }

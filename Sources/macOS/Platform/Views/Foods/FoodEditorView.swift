@@ -175,13 +175,26 @@ struct FoodEditorView: View {
 }
 
 private struct IngredientSelectionSheet: View {
+    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     let available: [Ingredient]
     @Binding var selected: [FoodIngredientDraft]
     @State private var search = ""
+    @State private var ingredientEditor: NewIngredientRoute?
+    @State private var pendingCreatedIngredientID: UUID?
 
     private var filtered: [Ingredient] {
         available.filter { search.isEmpty || $0.name.localizedStandardContains(search) }
+    }
+
+    private var trimmedSearch: String {
+        search.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canCreateIngredient: Bool {
+        !trimmedSearch.isEmpty && !available.contains {
+            $0.name.compare(trimmedSearch, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }
     }
 
     var body: some View {
@@ -197,6 +210,22 @@ private struct IngredientSelectionSheet: View {
             }
             .padding(.horizontal, 12).frame(height: 36)
             .background(Color.secondary.opacity(0.08), in: Capsule())
+
+            if canCreateIngredient {
+                Button {
+                    let id = UUID()
+                    pendingCreatedIngredientID = id
+                    ingredientEditor = NewIngredientRoute(id: id, name: trimmedSearch)
+                } label: {
+                    Label("Create \u{201c}\(trimmedSearch)\u{201d}", systemImage: "plus.circle.fill")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(NutritionTheme.accent)
+                .padding(.horizontal, 10)
+                .accessibilityHint("Opens a new ingredient form with this name")
+            }
 
             List(filtered) { ingredient in
                 Toggle(isOn: Binding(get: {
@@ -222,7 +251,35 @@ private struct IngredientSelectionSheet: View {
             }
         }
         .padding(18)
+        .sheet(item: $ingredientEditor, onDismiss: selectCreatedIngredient) { route in
+            NavigationStack {
+                IngredientEditorView(ingredientID: route.id, initialName: route.name)
+            }
+            .frame(minWidth: 650, minHeight: 720)
+        }
     }
+
+    private func selectCreatedIngredient() {
+        defer { pendingCreatedIngredientID = nil }
+        guard let id = pendingCreatedIngredientID else { return }
+        let descriptor = FetchDescriptor<Ingredient>(predicate: #Predicate { $0.id == id })
+        guard let ingredient = try? context.fetch(descriptor).first else { return }
+        if !selected.contains(where: { $0.ingredientID == ingredient.id }) {
+            selected.append(
+                FoodIngredientDraft(
+                    ingredientID: ingredient.id,
+                    quantity: ingredient.basisQuantity,
+                    unitID: ingredient.basisUnit?.id ?? "g"
+                )
+            )
+        }
+        search = ""
+    }
+}
+
+private struct NewIngredientRoute: Identifiable {
+    let id: UUID
+    let name: String
 }
 
 struct ValidationError: LocalizedError {

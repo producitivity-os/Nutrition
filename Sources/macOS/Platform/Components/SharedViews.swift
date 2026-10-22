@@ -71,28 +71,48 @@ struct EditableMediaTile: View {
     var size = CGSize(width: 132, height: 116)
     @State private var importing = false
     @State private var error: String?
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
 
     var body: some View {
-        Button { importing = true } label: {
-            ZStack(alignment: .bottom) {
-                MediaThumbnail(asset: asset, cornerRadius: 15)
-                HStack(spacing: 5) {
-                    Image(systemName: asset == nil ? "photo.badge.plus" : "photo.badge.arrow.down")
-                    Text(asset == nil ? title : "Replace")
+        ZStack(alignment: .bottom) {
+            MediaThumbnail(asset: asset, cornerRadius: 15)
+            if asset == nil || isHovered {
+                Button { importing = true } label: {
+                    if asset == nil {
+                        Label("Add", systemImage: "plus")
+                            .padding(.horizontal, 3)
+                    } else {
+                        Image(systemName: "photo.badge.arrow.down")
+                            .frame(width: 18, height: 18)
+                    }
                 }
+                .buttonStyle(.plain)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
-                .padding(.horizontal, 9).padding(.vertical, 6)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
                 .background(.ultraThinMaterial, in: Capsule())
                 .padding(8)
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                .accessibilityLabel(asset == nil ? "Add image" : "Replace image")
             }
-            .frame(width: size.width, height: size.height)
-            .overlay { RoundedRectangle(cornerRadius: 15).stroke(.secondary.opacity(0.2)) }
         }
-        .buttonStyle(.plain)
+        .frame(width: size.width, height: size.height)
+        .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(isFocused ? Color.accentColor : .secondary.opacity(0.2), lineWidth: isFocused ? 2 : 1)
+        }
         .focusable()
-        .help("Choose an image, or focus this tile and press Command-V")
+        .focused($isFocused)
+        .onTapGesture { isFocused = true }
+        .onHover { hovered in
+            withAnimation(.easeOut(duration: 0.14)) { isHovered = hovered }
+        }
+        .help("Select this image to paste, or use its Add or replace button to choose a file")
         .contextMenu {
+            Button(asset == nil ? "Add Image" : "Replace Image") { importing = true }
             Button("Paste Image") { pasteImage() }
             if asset != nil { Button("Remove Image", role: .destructive) { asset = nil } }
         }

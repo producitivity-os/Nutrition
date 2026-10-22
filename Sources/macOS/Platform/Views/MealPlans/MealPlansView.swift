@@ -18,15 +18,6 @@ struct MealPlansView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(
-                eyebrow: "Reusable plans and calendar weeks",
-                title: "Meal Plans",
-                actionTitle: section == 0 ? "Add Template" : "Edit Week"
-            ) {
-                section == 0 ? createTemplate() : openCurrentWeek()
-            }
-            .padding([.horizontal, .top], 20)
-
             Picker("Plan type", selection: $section) {
                 Text("Templates").tag(0)
                 Text("Calendar").tag(1)

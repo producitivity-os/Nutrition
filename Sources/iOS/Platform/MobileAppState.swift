@@ -19,6 +19,7 @@ final class MobileAppState {
     var isReady = false
     var errorMessage: String?
     var cloudStatus = "Not synced"
+    var weightEntryRequest = 0
 
     init(catalogContainer: ModelContainer, healthContainer: ModelContainer) {
         self.catalogContainer = catalogContainer
@@ -54,6 +55,7 @@ final class MobileAppState {
             if consumed {
                 guard let draft = try await catalogStore.consumptionDraft(itemID: itemID) else { return }
                 let snapshot = try await healthStore.logMeal(draft)
+                try await catalogStore.setPlannedConsumedState(itemID: itemID, consumed: true)
                 todaySnapshots = try await healthStore.snapshots(on: .now)
                 macroHistory = try await healthStore.macroHistory()
                 if preferences.healthKitEnabled, await healthKit.requestAccess() {
@@ -66,12 +68,14 @@ final class MobileAppState {
                 }
             } else {
                 let correlationID = try await healthStore.removeMeal(plannedItemID: itemID)
+                try await catalogStore.setPlannedConsumedState(itemID: itemID, consumed: false)
                 todaySnapshots = try await healthStore.snapshots(on: .now)
                 macroHistory = try await healthStore.macroHistory()
                 if let correlationID, preferences.healthKitEnabled {
                     try? await healthKit.deleteMeal(correlationID: correlationID)
                 }
             }
+            await routineProvider.publish(container: catalogContainer)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -137,23 +141,38 @@ final class MobileAppState {
 
     func handleRoutineInvocation(_ url: URL) async {
         do {
-            guard let invocation = try await routineProvider.invocation(from: url) else { return }
-            await routineProvider.update(invocation, state: .claimed, message: "Opening Nutrition")
-            guard let rawMealID = invocation.configuration["mealID"], let mealID = UUID(uuidString: rawMealID) else {
-                await routineProvider.update(invocation, state: .failed, message: "The selected meal is unavailable.")
-                return
-            }
-            switch invocation.actionID {
+            guard let request = try await routineProvider.request(from: url) else { return }
+            await routineProvider.update(request, state: .claimed, message: "Opening Nutrition")
+            let mealID = request.configuration["mealID"].flatMap(UUID.init(uuidString:))
+            switch request.actionID {
             case "mark-eaten":
-                await routineProvider.update(invocation, state: .running, message: "Logging meal")
+                guard let mealID else {
+                    await routineProvider.update(request, state: .completed, message: "Choose a meal in Nutrition")
+                    return
+                }
+                await routineProvider.update(request, state: .running, message: "Logging meal")
                 await setMeal(mealID, consumed: true)
-                await routineProvider.update(invocation, state: .completed, message: "Meal logged")
+                await routineProvider.update(request, state: .completed, message: "Meal logged")
+            case "meals-today":
+                guard let mealID else {
+                    await routineProvider.update(request, state: .completed, message: "Choose a meal in Nutrition")
+                    return
+                }
+                let target = request.configuration["targetCompleted"] != "false"
+                await routineProvider.update(request, state: .running, message: "Updating meal")
+                await setMeal(mealID, consumed: target)
+                await routineProvider.update(request, state: .completed, message: target ? "Meal logged" : "Meal unlogged")
             case "start-cooking":
-                await routineProvider.update(invocation, state: .running, message: "Cooking started")
+                await routineProvider.update(request, state: .completed, message: mealID == nil ? "Choose a meal to cook" : "Cooking opened")
             case "open-meal":
-                await routineProvider.update(invocation, state: .completed, message: "Meal opened")
+                await routineProvider.update(request, state: .completed, message: mealID == nil ? "Choose a meal" : "Meal opened")
+            case "water-today":
+                await routineProvider.update(request, state: .completed, message: "Water tracker opened")
+            case "log-weight":
+                weightEntryRequest += 1
+                await routineProvider.update(request, state: .completed, message: "Weight entry opened")
             default:
-                await routineProvider.update(invocation, state: .failed, message: "Unsupported Nutrition action")
+                await routineProvider.update(request, state: .failed, message: "Unsupported Nutrition action")
             }
             await routineProvider.publish(container: catalogContainer)
         } catch {

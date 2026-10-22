@@ -40,11 +40,19 @@ struct MobileIngredientsView: View {
                 }
             }
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                Button { editor = IngredientRoute(ingredient.id) } label: { Label("Edit", systemImage: "pencil") }
+                Button { editor = IngredientRoute(ingredient.id) } label: {
+                    Label("Edit", systemImage: "pencil")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 24, height: 24, alignment: .center)
+                }
                     .tint(NutritionTheme.accent)
             }
             .swipeActions(edge: .trailing) {
-                Button(role: .destructive) { ingredient.archivedAt = .now; try? context.save() } label: { Label("Archive", systemImage: "archivebox") }
+                Button(role: .destructive) { ingredient.archivedAt = .now; try? context.save() } label: {
+                    Label("Archive", systemImage: "archivebox")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 24, height: 24, alignment: .center)
+                }
             }
         }
         .overlay { if filtered.isEmpty { ContentUnavailableView("No ingredients", systemImage: "leaf") } }
@@ -62,6 +70,7 @@ struct MobileIngredientEditor: View {
     @Query(sort: [SortDescriptor(\NutrientDefinition.sortOrder)]) private var nutrientDefinitions: [NutrientDefinition]
     @Query(filter: #Predicate<Store> { $0.archivedAt == nil }, sort: [SortDescriptor(\Store.name)]) private var stores: [Store]
     let ingredientID: UUID
+    var initialName = ""
     @State private var name = ""
     @State private var details = ""
     @State private var basisQuantity = 100.0
@@ -125,9 +134,6 @@ struct MobileIngredientEditor: View {
                         }
                     }
                 }
-                if ingredient != nil {
-                    Section("Reviews") { NutritionReviewSection(targetID: ingredientID) }
-                }
             }
             .navigationTitle(ingredient == nil ? "New Ingredient" : "Edit Ingredient")
             .toolbar {
@@ -145,7 +151,10 @@ struct MobileIngredientEditor: View {
 
     private func load() {
         guard !loaded else { return }; loaded = true
-        guard let ingredient else { return }
+        guard let ingredient else {
+            name = initialName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return
+        }
         name = ingredient.name; details = ingredient.ingredientDescription; basisQuantity = ingredient.basisQuantity; basisUnitID = ingredient.basisUnit?.id ?? "g"; imageAsset = ingredient.image
         nutrients = Dictionary(uniqueKeysWithValues: ingredient.nutrients.compactMap { value in value.nutrient.map { ($0.id, value.amount) } })
         selectedStoreIDs = Set(ingredient.listings.compactMap { $0.store?.id })
@@ -188,7 +197,13 @@ struct MobileStoresView: View {
             Button { editor = StoreRoute(store.id) } label: {
                 HStack { Image(systemName: "storefront").foregroundStyle(.orange); VStack(alignment: .leading) { Text(store.name).foregroundStyle(.primary); Text("\(store.branches.filter { $0.archivedAt == nil }.count) branches").font(.caption).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
             }
-            .swipeActions { Button(role: .destructive) { store.archivedAt = .now; try? context.save() } label: { Label("Archive", systemImage: "archivebox") } }
+            .swipeActions {
+                Button(role: .destructive) { store.archivedAt = .now; try? context.save() } label: {
+                    Label("Archive", systemImage: "archivebox")
+                        .labelStyle(.iconOnly)
+                        .frame(width: 24, height: 24, alignment: .center)
+                }
+            }
         }
         .overlay { if stores.isEmpty { ContentUnavailableView("No stores", systemImage: "storefront") } }
         .navigationTitle("Stores")

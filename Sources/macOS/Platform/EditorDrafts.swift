@@ -22,11 +22,9 @@ struct ConversionDraft: Identifiable, Hashable {
 struct ListingDraft: Identifiable, Hashable {
     var id = UUID()
     var storeID: UUID?
-    var branchID: UUID?
     var packageQuantity: Double?
     var unitID: String?
     var price: Double?
-    var isAvailable = true
 }
 
 struct BranchDraft: Identifiable, Hashable {

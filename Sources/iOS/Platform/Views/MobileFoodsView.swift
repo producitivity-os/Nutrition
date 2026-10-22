@@ -446,30 +446,81 @@ private struct MobileFoodEditorView: View {
 }
 
 private struct MobileIngredientSelection: View {
+    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     let available: [Ingredient]
     @Binding var selected: [MobileIngredientDraft]
     @State private var search = ""
+    @State private var ingredientEditor: MobileNewIngredientRoute?
+    @State private var pendingCreatedIngredientID: UUID?
+
+    private var trimmedSearch: String {
+        search.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canCreateIngredient: Bool {
+        !trimmedSearch.isEmpty && !available.contains {
+            $0.name.compare(trimmedSearch, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            List(available.filter { search.isEmpty || $0.name.localizedStandardContains(search) }) { ingredient in
-                Toggle(isOn: Binding(get: { selected.contains { $0.ingredientID == ingredient.id } }, set: { enabled in
-                    if enabled {
-                        if !selected.contains(where: { $0.ingredientID == ingredient.id }) {
-                            selected.append(MobileIngredientDraft(ingredientID: ingredient.id, quantity: ingredient.basisQuantity, unitID: ingredient.basisUnit?.id ?? "g"))
+            List {
+                if canCreateIngredient {
+                    Button {
+                        let id = UUID()
+                        pendingCreatedIngredientID = id
+                        ingredientEditor = MobileNewIngredientRoute(id: id, name: trimmedSearch)
+                    } label: {
+                        Label("Create \u{201c}\(trimmedSearch)\u{201d}", systemImage: "plus.circle.fill")
+                            .foregroundStyle(NutritionTheme.accent)
+                    }
+                }
+
+                ForEach(available.filter { search.isEmpty || $0.name.localizedStandardContains(search) }) { ingredient in
+                    Toggle(isOn: Binding(get: { selected.contains { $0.ingredientID == ingredient.id } }, set: { enabled in
+                        if enabled {
+                            if !selected.contains(where: { $0.ingredientID == ingredient.id }) {
+                                selected.append(MobileIngredientDraft(ingredientID: ingredient.id, quantity: ingredient.basisQuantity, unitID: ingredient.basisUnit?.id ?? "g"))
+                            }
+                        } else { selected.removeAll { $0.ingredientID == ingredient.id } }
+                    })) {
+                        HStack {
+                            MobileFoodImage(asset: ingredient.image).frame(width: 40, height: 40)
+                            Text(ingredient.name)
                         }
-                    } else { selected.removeAll { $0.ingredientID == ingredient.id } }
-                })) {
-                    HStack {
-                        MobileFoodImage(asset: ingredient.image).frame(width: 40, height: 40)
-                        Text(ingredient.name)
                     }
                 }
             }
             .searchable(text: $search)
             .navigationTitle("Ingredients")
             .toolbar { Button("Done") { dismiss() } }
+            .sheet(item: $ingredientEditor, onDismiss: selectCreatedIngredient) { route in
+                MobileIngredientEditor(ingredientID: route.id, initialName: route.name)
+            }
         }
     }
+
+    private func selectCreatedIngredient() {
+        defer { pendingCreatedIngredientID = nil }
+        guard let id = pendingCreatedIngredientID else { return }
+        let descriptor = FetchDescriptor<Ingredient>(predicate: #Predicate { $0.id == id })
+        guard let ingredient = try? context.fetch(descriptor).first else { return }
+        if !selected.contains(where: { $0.ingredientID == ingredient.id }) {
+            selected.append(
+                MobileIngredientDraft(
+                    ingredientID: ingredient.id,
+                    quantity: ingredient.basisQuantity,
+                    unitID: ingredient.basisUnit?.id ?? "g"
+                )
+            )
+        }
+        search = ""
+    }
+}
+
+private struct MobileNewIngredientRoute: Identifiable {
+    let id: UUID
+    let name: String
 }

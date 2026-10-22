@@ -10,7 +10,7 @@ extension Calendar {
 }
 
 extension MealSlot {
-    var title: String { rawValue.capitalized }
+    var title: String { self == .snack ? "Snacks" : rawValue.capitalized }
 }
 
 func nutritionDate(weekStart: Date, weekday: Int) -> Date {

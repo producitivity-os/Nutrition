@@ -61,6 +61,46 @@ actor NutritionStoreActor {
         try modelContext.save()
     }
 
+    func setPlannedConsumedState(itemID: UUID, consumed: Bool) throws {
+        let descriptor = FetchDescriptor<PlannedMealItem>(predicate: #Predicate { $0.id == itemID })
+        guard let item = try modelContext.fetch(descriptor).first else { return }
+        item.consumedAt = consumed ? .now : nil
+        try modelContext.save()
+    }
+
+    @discardableResult
+    func logFood(foodID: UUID, date: Date, mealSlot: MealSlot, servings: Double) throws -> UUID? {
+        let descriptor = FetchDescriptor<Food>(predicate: #Predicate { $0.id == foodID })
+        guard let food = try modelContext.fetch(descriptor).first else { return nil }
+        let nutrients = try modelContext.fetch(FetchDescriptor<NutrientDefinition>(sortBy: [SortDescriptor(\.sortOrder)]))
+        let preferences = try modelContext.fetch(FetchDescriptor<AppPreferences>()).first
+        let analytics = NutritionCalculator.calculate(food: food, nutrients: nutrients, preferences: preferences)
+        let multiplier = max(0.01, servings)
+        let values = analytics.perServing.map {
+            NutrientAggregate(nutrientID: $0.nutrientID, amount: $0.amount.map { $0 * multiplier }, isComplete: $0.isComplete)
+        }
+        let snapshot = ConsumptionSnapshot(
+            plannedItemID: UUID(),
+            localDate: Calendar.current.startOfDay(for: date),
+            foodID: food.id,
+            foodName: food.name,
+            mealSlot: mealSlot,
+            servings: multiplier,
+            nutrientsData: try JSONEncoder().encode(values),
+            priceMinor: analytics.cost.map { Int((Double($0.perServingMinor) * multiplier).rounded()) },
+            currencyCode: analytics.cost?.currencyCode
+        )
+        modelContext.insert(snapshot)
+        try modelContext.save()
+        return snapshot.id
+    }
+
+    func deleteFoodLog(snapshotID: UUID) throws {
+        let descriptor = FetchDescriptor<ConsumptionSnapshot>(predicate: #Predicate { $0.id == snapshotID })
+        try modelContext.fetch(descriptor).forEach(modelContext.delete)
+        try modelContext.save()
+    }
+
     func consumptionDraft(itemID: UUID) throws -> MealConsumptionDraft? {
         let descriptor = FetchDescriptor<PlannedMealItem>(predicate: #Predicate { $0.id == itemID })
         guard let item = try modelContext.fetch(descriptor).first, let food = item.food else { return nil }

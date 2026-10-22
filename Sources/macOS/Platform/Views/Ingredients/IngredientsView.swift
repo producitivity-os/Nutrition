@@ -6,47 +6,49 @@ struct IngredientsView: View {
     @Environment(\.openWindow) private var openWindow
     @Query(filter: #Predicate<Ingredient> { $0.archivedAt == nil }, sort: [SortDescriptor(\Ingredient.name)]) private var ingredients: [Ingredient]
     @State private var search = ""
-    @State private var revealedIngredientID: UUID?
 
     private var filtered: [Ingredient] { ingredients.filter { search.isEmpty || $0.name.localizedStandardContains(search) } }
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(eyebrow: "Nutrition building blocks", title: "Ingredients", actionTitle: "Add Ingredient") { openWindow(value: EditorRoute.ingredient(UUID())) }
-                .padding([.horizontal, .top], 20)
-            HStack { LucideIcon(name: .search, size: 14).foregroundStyle(.secondary); TextField("Search ingredients", text: $search).textFieldStyle(.plain) }
-                .padding(.horizontal, 9).frame(height: 31).background(.background, in: RoundedRectangle(cornerRadius: 8)).overlay { RoundedRectangle(cornerRadius: 8).stroke(.separator) }.padding(20)
             if filtered.isEmpty {
                 EmptyCollectionView(icon: .leaf, title: "No ingredients yet", message: "Add ingredients with nutrition per 100 g or any basis you choose.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.top, 28)
             } else {
                 List(filtered) { ingredient in
-                    IngredientSwipeRow(
-                        ingredient: ingredient,
-                        isRevealed: Binding(
-                            get: { revealedIngredientID == ingredient.id },
-                            set: { revealedIngredientID = $0 ? ingredient.id : nil }
-                        ),
-                        edit: { openWindow(value: EditorRoute.ingredient(ingredient.id)) },
-                        duplicate: { duplicate(ingredient) },
-                        remove: {
-                            ingredient.archivedAt = .now
-                            ingredient.updatedAt = .now
-                            try? context.save()
-                        }
-                    )
+                    IngredientRow(ingredient: ingredient)
+                        .listRowBackground(Color.clear)
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) { openWindow(value: EditorRoute.ingredient(ingredient.id)) }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                remove(ingredient)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                                    .labelStyle(.iconOnly)
+                                    .frame(width: 24, height: 24, alignment: .center)
+                            }
+
+                            Button {
+                                openWindow(value: EditorRoute.ingredient(ingredient.id))
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                                    .labelStyle(.iconOnly)
+                                    .frame(width: 24, height: 24, alignment: .center)
+                            }
+                            .tint(NutritionTheme.accent)
+                        }
                         .contextMenu {
                             Button("Edit") { openWindow(value: EditorRoute.ingredient(ingredient.id)) }
                             Button("Duplicate") { duplicate(ingredient) }
                             Divider()
-                            Button("Remove Ingredient", role: .destructive) { ingredient.archivedAt = .now; try? context.save() }
+                            Button("Remove Ingredient", role: .destructive) { remove(ingredient) }
                         }
                 }.listStyle(.inset)
             }
         }
+        .searchable(text: $search, placement: .toolbar, prompt: "Search ingredients")
     }
 
     private func duplicate(_ source: Ingredient) {
@@ -54,73 +56,14 @@ struct IngredientsView: View {
         context.insert(copy)
         copy.nutrients = source.nutrients.map { IngredientNutrient(amount: $0.amount, ingredient: copy, nutrient: $0.nutrient) }
         copy.conversions = source.conversions.map { IngredientUnitConversion(basisUnitsPerUnit: $0.basisUnitsPerUnit, ingredient: copy, unit: $0.unit) }
-        copy.listings = source.listings.map { IngredientListing(packageQuantity: $0.packageQuantity, priceMinor: $0.priceMinor, currencyCode: $0.currencyCode, isAvailable: $0.isAvailable, ingredient: copy, store: $0.store, branch: $0.branch, unit: $0.unit) }
+        copy.listings = source.listings.map { IngredientListing(packageQuantity: $0.packageQuantity, priceMinor: $0.priceMinor, currencyCode: $0.currencyCode, isAvailable: true, ingredient: copy, store: $0.store, branch: nil, unit: $0.unit) }
         try? context.save(); openWindow(value: EditorRoute.ingredient(copy.id))
     }
-}
 
-private struct IngredientSwipeRow: View {
-    let ingredient: Ingredient
-    @Binding var isRevealed: Bool
-    let edit: () -> Void
-    let duplicate: () -> Void
-    let remove: () -> Void
-    @GestureState private var translation: CGFloat = 0
-    private let actionWidth: CGFloat = 216
-
-    private var offset: CGFloat {
-        min(0, max(-actionWidth, (isRevealed ? -actionWidth : 0) + translation))
-    }
-
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            HStack(spacing: 0) {
-                action("Edit", symbol: "pencil", color: NutritionTheme.accent, perform: edit)
-                action("Duplicate", symbol: "doc.on.doc", color: .gray, perform: duplicate)
-                action("Delete", symbol: "trash", color: .red, perform: remove)
-            }
-            .frame(width: actionWidth)
-            .opacity(offset < 0 ? 1 : 0)
-            .allowsHitTesting(isRevealed)
-
-            IngredientRow(ingredient: ingredient)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .offset(x: offset)
-                .gesture(
-                    DragGesture(minimumDistance: 15)
-                        .updating($translation) { value, state, _ in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                            state = value.translation.width
-                        }
-                        .onEnded { value in
-                            guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                isRevealed = (isRevealed ? -actionWidth : 0) + value.predictedEndTranslation.width < -60
-                            }
-                        }
-                )
-        }
-        .clipped()
-        .accessibilityAction(named: "Edit", edit)
-        .accessibilityAction(named: "Duplicate", duplicate)
-        .accessibilityAction(named: "Delete", remove)
-    }
-
-    private func action(_ title: String, symbol: String, color: Color, perform: @escaping () -> Void) -> some View {
-        Button {
-            isRevealed = false
-            perform()
-        } label: {
-            VStack(spacing: 4) {
-                Image(systemName: symbol)
-                Text(title).font(.caption2)
-            }
-            .foregroundStyle(.white)
-            .frame(width: 72, height: 56)
-            .background(color)
-        }
-        .buttonStyle(.plain)
+    private func remove(_ ingredient: Ingredient) {
+        ingredient.archivedAt = .now
+        ingredient.updatedAt = .now
+        try? context.save()
     }
 }
 

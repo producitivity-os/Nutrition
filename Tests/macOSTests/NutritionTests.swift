@@ -38,6 +38,29 @@ struct NutritionTests {
         #expect(result.perServing.first(where: { $0.nutrientID == "protein" })?.isComplete == false)
     }
 
+    @Test func missingIngredientNutrientsDoNotDiscardKnownRecipeTotals() {
+        let gram = UnitDefinition(id: "g", name: "Gram", symbol: "g", dimension: .mass, toBaseFactor: 1)
+        let calories = NutrientDefinition(id: "energy_kcal", name: "Calories", category: "energy", unit: "kcal", dailyValue: 2_000, sortOrder: 0)
+        let protein = NutrientDefinition(id: "protein", name: "Protein", category: "macro", unit: "g", dailyValue: 50, sortOrder: 1)
+        let chicken = Ingredient(name: "Chicken", basisQuantity: 100, basisUnit: gram)
+        chicken.nutrients = [
+            IngredientNutrient(amount: 165, ingredient: chicken, nutrient: calories),
+            IngredientNutrient(amount: 31, ingredient: chicken, nutrient: protein),
+        ]
+        let seasoning = Ingredient(name: "Seasoning", basisQuantity: 100, basisUnit: gram)
+        let food = Food(name: "Seasoned Chicken", servings: 2)
+        food.ingredients = [
+            FoodIngredient(quantity: 200, position: 0, food: food, ingredient: chicken, unit: gram),
+            FoodIngredient(quantity: 10, position: 1, food: food, ingredient: seasoning, unit: gram),
+        ]
+
+        let result = NutritionCalculator.calculate(food: food, nutrients: [calories, protein], preferences: nil)
+
+        #expect(result.amount("energy_kcal") == 165)
+        #expect(result.amount("protein") == 31)
+        #expect(result.perServing.allSatisfy { $0.isComplete })
+    }
+
     @Test func preparationDurationsPersistAndAggregate() throws {
         let container = try container()
         let context = ModelContext(container)
@@ -88,6 +111,56 @@ struct NutritionTests {
         let second = try MediaService.importImage(data: data, name: "two.png", mimeType: "image/png", context: context)
         #expect(first.id == second.id)
         #expect(try context.fetchCount(FetchDescriptor<MediaAsset>()) == 1)
+    }
+
+    @Test func nutrientPasteParsesMarkdownTablesAndIgnoresRemovedColumns() {
+        let source = """
+        | Nutrient | Category | Amount | Unit | Status |
+        | --- | --- | ---: | --- | --- |
+        | Calories | Energy | 57 | kcal | Complete |
+        | Protein | Macro | 0.7 | g | Complete |
+        """
+
+        #expect(NutrientTablePasteParser.rows(from: source) == [
+            NutrientTablePasteRow(nutrientName: "Calories", amount: "57", unit: "kcal"),
+            NutrientTablePasteRow(nutrientName: "Protein", amount: "0.7", unit: "g"),
+        ])
+    }
+
+    @Test func nutrientPasteParsesCSVAndSpreadsheetValueColumns() {
+        let csv = """
+        Nutrient,Amount,Unit
+        "Vitamin B12",2.4,µg
+        Sodium,15,mg
+        """
+        #expect(NutrientTablePasteParser.rows(from: csv) == [
+            NutrientTablePasteRow(nutrientName: "Vitamin B12", amount: "2.4", unit: "µg"),
+            NutrientTablePasteRow(nutrientName: "Sodium", amount: "15", unit: "mg"),
+        ])
+        #expect(NutrientTablePasteParser.rows(from: "Vitamin B12\t2.4\tµg") == [
+            NutrientTablePasteRow(nutrientName: "Vitamin B12", amount: "2.4", unit: "µg"),
+        ])
+
+        #expect(NutrientTablePasteParser.rows(from: "10\n2.5\n0") == [
+            NutrientTablePasteRow(nutrientName: nil, amount: "10", unit: nil),
+            NutrientTablePasteRow(nutrientName: nil, amount: "2.5", unit: nil),
+            NutrientTablePasteRow(nutrientName: nil, amount: "0", unit: nil),
+        ])
+        #expect(NutrientTablePasteParser.rows(from: "0,0.56,8.4") == [
+            NutrientTablePasteRow(nutrientName: nil, amount: "0", unit: nil),
+            NutrientTablePasteRow(nutrientName: nil, amount: "0.56", unit: nil),
+            NutrientTablePasteRow(nutrientName: nil, amount: "8.4", unit: nil),
+        ])
+        #expect(NutrientTablePasteParser.rows(from: "0 0.56 8.4") == [
+            NutrientTablePasteRow(nutrientName: nil, amount: "0", unit: nil),
+            NutrientTablePasteRow(nutrientName: nil, amount: "0.56", unit: nil),
+            NutrientTablePasteRow(nutrientName: nil, amount: "8.4", unit: nil),
+        ])
+        #expect(NutrientTablePasteParser.rows(from: "67.57\nUnknown\n0.84") == [
+            NutrientTablePasteRow(nutrientName: nil, amount: "67.57", unit: nil),
+            NutrientTablePasteRow(nutrientName: nil, amount: "0", unit: nil),
+            NutrientTablePasteRow(nutrientName: nil, amount: "0.84", unit: nil),
+        ])
     }
 
     @Test func consumedMealCreatesAndRemovesImmutableSnapshot() async throws {

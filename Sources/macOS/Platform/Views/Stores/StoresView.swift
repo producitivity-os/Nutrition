@@ -12,9 +12,6 @@ struct StoresView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            PageHeader(eyebrow: "Where to buy", title: "Stores", actionTitle: "Add Store") {
-                openWindow(value: EditorRoute.store(UUID()))
-            }
             if stores.isEmpty {
                 EmptyCollectionView(icon: .store, title: "No stores yet", message: "Add stores, branch locations, and package prices.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

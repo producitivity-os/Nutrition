@@ -12,7 +12,7 @@ enum FoodCategory: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 enum MealSlot: String, Codable, CaseIterable, Identifiable, Sendable {
-    case breakfast, lunch, dinner, snack
+    case breakfast, lunch, snack, dinner
     var id: String { rawValue }
 }
 
@@ -422,6 +422,11 @@ final class ConsumptionSnapshot {
     var priceMinor: Int?
     var currencyCode: String?
     var loggedAt: Date
+
+    var mealSlot: MealSlot {
+        get { MealSlot(rawValue: mealSlotRaw) ?? .breakfast }
+        set { mealSlotRaw = newValue.rawValue }
+    }
 
     init(id: UUID = UUID(), plannedItemID: UUID, localDate: Date, foodID: UUID, foodName: String, mealSlot: MealSlot, servings: Double, nutrientsData: Data, priceMinor: Int?, currencyCode: String?) {
         self.id = id

@@ -34,7 +34,7 @@ struct MobileTodayView: View {
                     energyCard
                     caloriesBreakdown
                     macroHistoryCard
-                    WeekStrip(selectedDate: $selectedDate, accentColor: NutritionTheme.accent, today: .now, checkedDates: Set(agendaEvents.map(\.date)))
+                    WeekStrip(selectedDate: $selectedDate, accentColor: NutritionTheme.accent, today: .now, checkedDates: Set(agendaEvents.map(\.date)), pillHorizontalPadding: 2)
                     if items.isEmpty {
                         ContentUnavailableView("No meals today", systemImage: "calendar", description: Text("Add meals from the Plans tab."))
                     } else {
@@ -65,6 +65,7 @@ struct MobileTodayView: View {
                 await state.refreshActivity()
             }
             .sheet(isPresented: $showingWeight) { WeightEntrySheet() }
+            .onChange(of: state.weightEntryRequest) { _, _ in showingWeight = true }
             .overlay(alignment: .bottomTrailing) {
                 MorphingActionMenu(actions: [
                     .init(id: "weight", icon: "scalemass", title: "Log Weight"),
@@ -91,7 +92,12 @@ struct MobileTodayView: View {
         return LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
             StatisticWidget(title: "Calories", systemImage: "flame.fill", value: snapshots.isEmpty || calories.count != snapshots.count ? "—" : calories.reduce(0, +).formatted(.number.precision(.fractionLength(0))), context: snapshots.isEmpty ? "No meals logged" : "kcal logged today", tint: Color(red: 1, green: 0.23, blue: 0.19))
             StatisticWidget(title: "Protein", systemImage: "leaf.fill", value: snapshots.isEmpty || protein.count != snapshots.count ? "—" : "\(protein.reduce(0, +).formatted(.number.precision(.fractionLength(0...1)))) g", context: snapshots.isEmpty ? "No meals logged" : "Logged today", tint: NutritionTheme.accent)
-            CurrentWeightWidget(kilograms: state.recentWeights.first?.kilograms, previousKilograms: state.recentWeights.dropFirst().first?.kilograms, unit: state.preferences.weightUnit)
+            CurrentWeightWidget(
+                kilograms: state.recentWeights.first?.kilograms,
+                previousKilograms: state.recentWeights.dropFirst().first?.kilograms,
+                unit: state.preferences.weightUnit,
+                onAddMeasurement: { showingWeight = true }
+            )
         }
     }
 

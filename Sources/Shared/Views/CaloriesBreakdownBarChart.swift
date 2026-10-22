@@ -1,9 +1,12 @@
 import Charts
-import SwiftUI
 import ProductivityUI
+import ProductivityRoutineKit
+import SwiftUI
 
 struct WaterTrackerWidget: View {
-    @AppStorage("nutrition.waterTargetML") private var target = 3500
+    private static let sharedDefaults = UserDefaults(suiteName: RoutineIntegrationStore.defaultAppGroup) ?? .standard
+
+    @AppStorage("nutrition.waterTargetML", store: sharedDefaults) private var target = 3500
     @AppStorage private var milliliters: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingTarget = false
@@ -11,65 +14,71 @@ struct WaterTrackerWidget: View {
     init(date: Date) {
         let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
         let key = "nutrition.water.\(components.year ?? 0)-\(components.month ?? 0)-\(components.day ?? 0)"
-        _milliliters = AppStorage(wrappedValue: 0, key)
+        if Self.sharedDefaults.object(forKey: key) == nil,
+           let legacy = UserDefaults.standard.object(forKey: key) as? Int {
+            Self.sharedDefaults.set(legacy, forKey: key)
+        }
+        if Self.sharedDefaults.object(forKey: "nutrition.waterTargetML") == nil,
+           let legacy = UserDefaults.standard.object(forKey: "nutrition.waterTargetML") as? Int {
+            Self.sharedDefaults.set(legacy, forKey: "nutrition.waterTargetML")
+        }
+        _milliliters = AppStorage(wrappedValue: 0, key, store: Self.sharedDefaults)
     }
 
     private var progress: Double { min(1, Double(milliliters) / Double(max(250, target))) }
+    private var visualProgress: Double { max(0.10, progress) }
     private let waterBlue = Color(red: 0.20, green: 0.62, blue: 0.96)
+    private let controlBlue = Color(red: 0.42, green: 0.72, blue: 0.96)
 
     var body: some View {
-        VStack(spacing: 10) {
-            TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || progress == 0 || progress == 1)) { timeline in
-                let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate * 1.3
-                ZStack(alignment: .topLeading) {
-                    Color.blue.opacity(0.09)
-                    GeometryReader { geometry in
-                        if progress == 1 {
-                            waterBlue
-                        } else if progress > 0 {
-                            WaterLayer(level: progress, phase: phase + 2, amplitude: 9)
-                                .fill(waterBlue.opacity(0.25))
-                            WaterLayer(level: progress, phase: -phase, amplitude: 7)
-                                .fill(waterBlue.opacity(0.4))
-                            WaterLayer(level: progress, phase: phase, amplitude: 10)
-                                .fill(waterBlue.opacity(0.8))
-                        }
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || progress == 0 || progress == 1)) { timeline in
+            let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate * 1.3
+            ZStack(alignment: .topLeading) {
+                Color.blue.opacity(0.06)
+                GeometryReader { _ in
+                    if visualProgress == 1 {
+                        waterBlue
+                    } else {
+                        WaterLayer(level: visualProgress, phase: phase + 2, amplitude: 9)
+                            .fill(waterBlue.opacity(0.25))
+                        WaterLayer(level: visualProgress, phase: -phase, amplitude: 7)
+                            .fill(waterBlue.opacity(0.4))
+                        WaterLayer(level: visualProgress, phase: phase, amplitude: 10)
+                            .fill(waterBlue.opacity(0.8))
                     }
+                }
+                HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Water").font(.headline)
-                        Spacer()
-                        Text("\(milliliters.formatted()) ml").font(.title3.bold()).monospacedDigit()
+                        Text("Water")
+                            .font(.headline)
+                            .foregroundStyle(visualProgress >= 0.84 ? Color.white : Color.primary)
+                        Spacer(minLength: 8)
+                        Text("\(milliliters.formatted()) ml")
+                            .font(.title3.bold())
+                            .monospacedDigit()
+                            .foregroundStyle(visualProgress >= 0.48 ? Color.white : Color.primary)
                         Button { showingTarget = true } label: {
-                            Text("Daily goal \((Double(target) / 1000).formatted()) L").font(.caption)
+                            Text("Daily goal \((Double(target) / 1000).formatted()) L")
+                                .font(.caption)
+                                .foregroundStyle(visualProgress >= 0.32 ? Color.white : Color.primary)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Change daily water target")
                     }
-                    .foregroundStyle(progress > 0.85 ? Color.white : Color.primary)
-                    .padding(16)
+                    Spacer(minLength: 0)
+                    waterControls
+                        .frame(width: 124)
                 }
-                .frame(width: 160, height: 240)
-                .clipShape(RoundedRectangle(cornerRadius: 20))
+                .padding(16)
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityValue("\(Int(progress * 100)) percent of daily water target")
-            HStack(spacing: 0) {
-                Button { milliliters = max(0, milliliters - 250) } label: {
-                    Image(systemName: "minus").frame(width: 64, height: 38)
-                }
-                .disabled(milliliters == 0)
-                .accessibilityLabel("Remove 250 milliliters of water")
-                Divider().frame(height: 18)
-                Button { milliliters += 250 } label: {
-                    Image(systemName: "plus").frame(width: 64, height: 38)
-                }
-                .accessibilityLabel("Add 250 milliliters of water")
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.blue)
-            .background(.thinMaterial, in: Capsule())
+            .frame(maxWidth: .infinity, minHeight: 116, maxHeight: 116)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityValue("\(Int(progress * 100)) percent of daily water target")
         .animation(.easeInOut(duration: 0.4), value: progress)
+        .onChange(of: milliliters) { _, _ in Task { await NutritionRoutineProvider.publishWaterStatus() } }
+        .onChange(of: target) { _, _ in Task { await NutritionRoutineProvider.publishWaterStatus() } }
         .popover(isPresented: $showingTarget) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Daily water target").font(.headline)
@@ -77,6 +86,30 @@ struct WaterTrackerWidget: View {
                 Button("Done") { showingTarget = false }
             }.padding().frame(minWidth: 240)
         }
+    }
+
+    private var waterControls: some View {
+        HStack(spacing: 0) {
+            Button { milliliters = max(0, milliliters - 250) } label: {
+                Image(systemName: "minus")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .disabled(milliliters == 0)
+            .opacity(milliliters == 0 ? 0.55 : 1)
+            .accessibilityLabel("Remove 250 milliliters of water")
+            Rectangle().fill(.white.opacity(0.45)).frame(width: 1, height: 18)
+            Button { milliliters += 250 } label: {
+                Image(systemName: "plus")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Add 250 milliliters of water")
+        }
+        .frame(maxWidth: .infinity, minHeight: 38, maxHeight: 38)
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .background(controlBlue, in: Capsule())
     }
 }
 
@@ -106,6 +139,16 @@ struct CurrentWeightWidget: View {
     let kilograms: Double?
     let previousKilograms: Double?
     var unit: String = "kg"
+    var onAddMeasurement: (() -> Void)?
+    var isEditing = false
+    var editValue: Binding<Double>?
+    var editError: String?
+    var onDecrease: (() -> Void)?
+    var onIncrease: (() -> Void)?
+    var onCancel: (() -> Void)?
+    var onSave: (() -> Void)?
+    var isHighlighted = false
+    @FocusState private var isWeightFieldFocused: Bool
 
     private var factor: Double { unit == "lb" ? 2.2046226218 : 1 }
     private var change: Double? {
@@ -120,8 +163,110 @@ struct CurrentWeightWidget: View {
         return "\(delta) \(unit) (\(change > 0 ? "+" : "")\(percent)%)"
     }
 
+    private let tint = Color.orange
+    private let emptyValueColor = Color(red: 0.72, green: 0.25, blue: 0.02)
+
+    @ViewBuilder
     var body: some View {
-        StatisticWidget(title: "Current Weight", systemImage: "scalemass", value: kilograms.map { "\(($0 * factor).formatted(.number.precision(.fractionLength(0...1)))) \(unit)" } ?? "—", context: context, tint: .orange, trendSymbol: change.map { $0 < 0 ? "arrow.down.circle" : $0 > 0 ? "arrow.up.circle" : "minus.circle" })
+        card
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Current Weight", systemImage: "scalemass")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(tint)
+                Spacer()
+                if onAddMeasurement != nil {
+                    Button(action: { onAddMeasurement?() }) {
+                        Image(systemName: isEditing ? "minus.circle.fill" : "plus.circle.fill")
+                            .foregroundStyle(tint)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isEditing ? "Close weight editor" : "Add weight measurement")
+                }
+            }
+            if isEditing, let editValue {
+                HStack(spacing: 8) {
+                    Button(action: { onDecrease?() }) {
+                        Image(systemName: "minus").frame(width: 28, height: 28)
+                            .background(.secondary.opacity(0.12), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    TextField("Weight", value: editValue, format: .number.precision(.fractionLength(1)))
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.center)
+                        .frame(width: 76)
+                        .focused($isWeightFieldFocused)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(isHighlighted ? tint : Color.clear, lineWidth: 2)
+                                .padding(-2)
+                        }
+                    Button(action: { onIncrease?() }) {
+                        Image(systemName: "plus").frame(width: 28, height: 28)
+                            .background(.secondary.opacity(0.12), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    Text(unit).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 8) {
+                    if let editError {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundStyle(.red)
+                            .help(editError)
+                    }
+                    Spacer()
+                    Button("Cancel", action: { onCancel?() })
+                        .buttonStyle(.plain)
+                        .foregroundStyle(tint)
+                        .padding(.horizontal, 8)
+                        .frame(height: 26)
+                    Button(action: { onSave?() }) {
+                        Text("Save")
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                            .frame(height: 26)
+                            .background(tint, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(editValue.wrappedValue <= 0 || !editValue.wrappedValue.isFinite)
+                    .opacity(editValue.wrappedValue <= 0 || !editValue.wrappedValue.isFinite ? 0.5 : 1)
+                }
+                .transition(.opacity)
+            } else {
+                Text(kilograms.map { "\(($0 * factor).formatted(.number.precision(.fractionLength(0...1)))) \(unit)" } ?? "—")
+                    .font(.title2.weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(kilograms == nil ? emptyValueColor : Color.primary)
+                HStack(spacing: 5) {
+                    if let change {
+                        Image(systemName: change < 0 ? "arrow.down.circle" : change > 0 ? "arrow.up.circle" : "minus.circle")
+                    }
+                    Text(context)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 18))
+        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .animation(.snappy(duration: 0.3), value: isEditing)
+        .onAppear { focusWeightFieldIfNeeded() }
+        .onChange(of: isEditing) { _, _ in focusWeightFieldIfNeeded() }
+        .onChange(of: isHighlighted) { _, _ in focusWeightFieldIfNeeded() }
+    }
+
+    private func focusWeightFieldIfNeeded() {
+        guard isEditing, isHighlighted else { return }
+        Task { @MainActor in
+            await Task.yield()
+            isWeightFieldFocused = true
+        }
     }
 }
 
